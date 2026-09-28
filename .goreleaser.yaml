@@ -1,0 +1,45 @@
+version: 2
+project_name: k8s-guardian
+
+builds:
+  - id: k8s-guardian
+    main: ./cmd/k8s-guardian
+    binary: k8s-guardian
+    env: [CGO_ENABLED=0]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+  # Same program under the kubectl plugin name, used by the Krew package.
+  - id: kubectl-guard
+    main: ./cmd/k8s-guardian
+    binary: kubectl-guard
+    env: [CGO_ENABLED=0]
+    ldflags: ["-s -w -X main.version={{ .Version }}"]
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+
+archives:
+  - id: k8s-guardian
+    ids: [k8s-guardian]
+    name_template: "k8s-guardian_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE, README.md]
+  - id: kubectl-guard
+    ids: [kubectl-guard]
+    name_template: "kubectl-guard_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+    files: [LICENSE]
+
+checksum:
+  name_template: checksums.txt
+
+changelog:
+  sort: asc
+  filters:
+    exclude: ["^docs:", "^test:", "^chore:"]

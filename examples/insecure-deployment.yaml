@@ -1,0 +1,37 @@
+# Example: a typical "works on my machine" Deployment with many guardrail violations.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+  namespace: shop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: web
+  template:
+    metadata:
+      labels:
+        app: web
+    spec:
+      hostNetwork: true
+      containers:
+        - name: nginx
+          image: nginx:latest # TODO pin me
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            privileged: true
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: web
+  namespace: shop
+spec:
+  selector:
+    app: web
+  ports:
+    - port: 80
+      targetPort: http

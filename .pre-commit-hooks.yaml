@@ -1,0 +1,14 @@
+- id: k8s-guardian
+  name: k8s-guardian
+  description: Validate Kubernetes manifests against k8s-guardian guardrails
+  entry: k8s-guardian check -f
+  language: golang
+  files: \.(ya?ml)$
+  exclude: (^|/)(\.github|charts/.*/templates)/
+- id: k8s-guardian-fix
+  name: k8s-guardian (auto-fix)
+  description: Auto-fix Kubernetes manifests in place
+  entry: k8s-guardian check --fix -f
+  language: golang
+  files: \.(ya?ml)$
+  exclude: (^|/)(\.github|charts/.*/templates)/
