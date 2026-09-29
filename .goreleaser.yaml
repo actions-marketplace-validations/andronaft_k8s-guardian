@@ -44,3 +44,20 @@ changelog:
   sort: asc
   filters:
     exclude: ["^docs:", "^test:", "^chore:"]
+
+release:
+  header: |
+    ## Install
+
+    ```bash
+    # Binary: download the archive for your platform below, or
+    go install github.com/andronaft/k8s-guardian/cmd/k8s-guardian@{{ .Tag }}
+
+    # Docker
+    docker run --rm -v "$PWD:/work" ghcr.io/andronaft/k8s-guardian:{{ .Version }} check -f .
+
+    # GitHub Action
+    #   - uses: andronaft/k8s-guardian@{{ .Tag }}
+    ```
+
+    `kubectl-guard_*` archives contain the kubectl plugin (`kubectl guard ...`).
