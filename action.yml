@@ -1,5 +1,5 @@
 name: k8s-guardian Kubernetes Guardrails
-description: Validate Kubernetes manifests and Helm charts (security, resources, probes, custom policies, live cluster fit) with inline PR annotations.
+description: Validate K8s manifests & Helm charts for security, resources, probes, and live cluster fit with inline PR annotations.
 author: andronaft
 branding:
   icon: shield
