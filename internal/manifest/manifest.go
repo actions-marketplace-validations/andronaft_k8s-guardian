@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -175,18 +176,32 @@ func LoadWithWarnings(path string) ([]*File, []string, error) {
 		}
 		return []*File{f}, nil, nil
 	}
+	// Files are read through an os.Root: a symlink (or a race replacing a
+	// file with one) can never make the walk read outside the directory,
+	// e.g. a pull request adding k8s/app.yaml -> ~/.kube/config. Symlinked
+	// files are skipped so --fix never writes through them either.
+	root, err := os.OpenRoot(path)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer root.Close()
 	var files []*File
 	var warnings []string
-	err = filepath.WalkDir(path, func(p string, d os.DirEntry, err error) error {
+	err = fs.WalkDir(root.FS(), ".", func(rel string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
+		p := filepath.Join(path, rel)
+		if d.Type()&fs.ModeSymlink != 0 {
+			warnings = append(warnings, fmt.Sprintf("skipped symlink %s", p))
+			return nil
+		}
 		if d.IsDir() {
-			if p == path {
+			if rel == "." {
 				return nil
 			}
 			if strings.HasPrefix(d.Name(), ".") || skipDirs[d.Name()] {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			if isChart(p) {
 				f, err := renderChart(p)
@@ -195,15 +210,15 @@ func LoadWithWarnings(path string) ([]*File, []string, error) {
 				} else {
 					files = append(files, f)
 				}
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
-		ext := strings.ToLower(filepath.Ext(p))
+		ext := strings.ToLower(filepath.Ext(rel))
 		if ext != ".yaml" && ext != ".yml" {
 			return nil
 		}
-		data, err := os.ReadFile(p)
+		data, err := root.ReadFile(rel)
 		if err != nil {
 			return err
 		}
@@ -222,7 +237,7 @@ func LoadWithWarnings(path string) ([]*File, []string, error) {
 }
 
 func loadFile(path string) (*File, error) {
-	data, err := os.ReadFile(path)
+	data, err := os.ReadFile(path) // #nosec G304 -- a path the user passed explicitly
 	if err != nil {
 		return nil, err
 	}
@@ -239,7 +254,7 @@ func renderChart(dir string) (*File, error) {
 		return nil, fmt.Errorf("%s is a Helm chart but `helm` was not found in PATH", dir)
 	}
 	var stderr bytes.Buffer
-	cmd := exec.Command("helm", "template", "k8s-guardian", dir)
+	cmd := exec.Command("helm", "template", "k8s-guardian", dir) // #nosec G204 -- no shell; dir is a local chart directory
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
@@ -273,9 +288,9 @@ func RenderKustomization(dir string) (*File, error) {
 	var cmd *exec.Cmd
 	switch {
 	case lookPath("kustomize"):
-		cmd = exec.Command("kustomize", "build", dir)
+		cmd = exec.Command("kustomize", "build", dir) // #nosec G204 -- no shell; plugins stay disabled
 	case lookPath("kubectl"):
-		cmd = exec.Command("kubectl", "kustomize", dir)
+		cmd = exec.Command("kubectl", "kustomize", dir) // #nosec G204 -- no shell; plugins stay disabled
 	default:
 		return nil, fmt.Errorf("%s is a Kustomize directory but neither `kustomize` nor `kubectl` was found in PATH", dir)
 	}

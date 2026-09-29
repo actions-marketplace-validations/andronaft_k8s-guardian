@@ -127,7 +127,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.message = "editor failed: " + msg.err.Error()
 			break
 		}
-		data, err := os.ReadFile(msg.path)
+		data, err := os.ReadFile(msg.path) // #nosec G304 -- our own temp file
 		if first, rest, ok := strings.Cut(string(data), "\n"); ok && strings.Contains(first, "edit and save to apply") {
 			data = []byte(rest)
 		}
@@ -236,8 +236,12 @@ func (m *Model) edit(p *Proposal) tea.Cmd {
 		return nil
 	}
 	fmt.Fprintf(f, "# %s — edit and save to apply, or empty the file to cancel\n", p.Title())
-	f.WriteString(content)
-	f.Close()
+	_, werr := f.WriteString(content)
+	if cerr := f.Close(); werr != nil || cerr != nil {
+		_ = os.Remove(f.Name())
+		m.message = fmt.Sprintf("cannot write temp file: %v %v", werr, cerr)
+		return nil
+	}
 	editor := os.Getenv("VISUAL")
 	if editor == "" {
 		editor = os.Getenv("EDITOR")
@@ -246,7 +250,8 @@ func (m *Model) edit(p *Proposal) tea.Cmd {
 		editor = "vi"
 	}
 	parts := strings.Fields(editor)
-	cmd := exec.Command(parts[0], append(parts[1:], f.Name())...)
+	// The user's own $VISUAL/$EDITOR, run without a shell on our temp file.
+	cmd := exec.Command(parts[0], append(parts[1:], f.Name())...) // #nosec G204 G702 -- user-configured editor
 	return tea.ExecProcess(cmd, func(err error) tea.Msg { return editResult{p, f.Name(), err} })
 }
 

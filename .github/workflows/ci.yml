@@ -60,7 +60,7 @@ jobs:
       - name: e2e tests
         run: go test -tags e2e -count=1 -v ./test/e2e/
 
-  # Known vulnerabilities in dependencies and the Go standard library.
+  # Known vulnerabilities (govulncheck) and security lint (gosec, must be clean).
   govulncheck:
     runs-on: ubuntu-latest
     steps:
@@ -72,6 +72,8 @@ jobs:
         env:
           GOTOOLCHAIN: auto
         run: go run golang.org/x/vuln/cmd/govulncheck@latest -show verbose ./...
+      - name: gosec
+        run: go run github.com/securego/gosec/v2/cmd/gosec@latest -quiet -exclude-dir=test ./...
 
   # Exercises the GitHub Action defined in action.yml.
   action:

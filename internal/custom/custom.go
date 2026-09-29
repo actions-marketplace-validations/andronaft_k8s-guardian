@@ -426,7 +426,7 @@ func LoadDocuments(paths []string) ([]Document, []string, error) {
 			files, _ = filepath.Glob(filepath.Join(p, "*.y*ml"))
 		}
 		for _, f := range files {
-			data, err := os.ReadFile(f)
+			data, err := os.ReadFile(f) // #nosec G304 -- rule files the user configured
 			if err != nil {
 				return nil, nil, err
 			}

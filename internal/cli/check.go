@@ -4,10 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 
 	"github.com/andronaft/k8s-guardian/internal/ai"
 	"github.com/andronaft/k8s-guardian/internal/cluster"
+	"github.com/andronaft/k8s-guardian/internal/fsutil"
 	"github.com/andronaft/k8s-guardian/internal/guardian"
 	"github.com/andronaft/k8s-guardian/internal/kube"
 	"github.com/andronaft/k8s-guardian/internal/live"
@@ -53,7 +53,7 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files)
+	files, err := loadFiles(f.files, a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -160,7 +160,7 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 			}
 			fixedYAML = append(fixedYAML, out)
 		case changed:
-			if err := os.WriteFile(file.Source, out, 0o644); err != nil {
+			if err := fsutil.WriteFile(file.Source, out); err != nil {
 				return ExitError, err
 			}
 			fmt.Fprintf(a.Stderr, "✏️  fixed %s\n", file.Source)
@@ -170,7 +170,9 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 		if i > 0 {
 			fmt.Fprintln(a.Stdout, "---")
 		}
-		a.Stdout.Write(y)
+		if _, err := a.Stdout.Write(y); err != nil {
+			return ExitError, err
+		}
 	}
 	s := report.Summarize(remaining)
 	s.Fixed = fixed

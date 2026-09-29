@@ -110,7 +110,7 @@ func (k *Kubectl) run(args ...string) ([]byte, error) {
 		args = append(args, "--context="+k.Context)
 	}
 	var stderr bytes.Buffer
-	cmd := exec.Command("kubectl", args...)
+	cmd := exec.Command("kubectl", args...) // #nosec G204 -- no shell; every value is validated by internal/k8sname
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {

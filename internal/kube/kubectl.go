@@ -41,7 +41,7 @@ func Get(args []string, namespace, kubeContext string, allNamespaces bool) (*man
 	}
 	cmdArgs = append(cmdArgs, "-o", "yaml")
 	var stderr bytes.Buffer
-	cmd := exec.Command("kubectl", cmdArgs...)
+	cmd := exec.Command("kubectl", cmdArgs...) // #nosec G204 -- no shell; arguments validated by internal/k8sname above
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {

@@ -217,15 +217,18 @@ func (f *flags) addInputs(pos []string) error {
 	return nil
 }
 
-func loadFiles(paths []string) ([]*manifest.File, error) {
+func loadFiles(paths []string, warn io.Writer) ([]*manifest.File, error) {
 	if len(paths) == 0 {
 		return nil, errors.New("no input: pass -f <file|dir|-> or -k <kustomize dir>")
 	}
 	var loaded []*manifest.File
 	for _, p := range paths {
-		fl, err := manifest.Load(p)
+		fl, warnings, err := manifest.LoadWithWarnings(p)
 		if err != nil {
 			return nil, err
+		}
+		for _, w := range warnings {
+			fmt.Fprintln(warn, "warning:", w)
 		}
 		loaded = append(loaded, fl...)
 	}

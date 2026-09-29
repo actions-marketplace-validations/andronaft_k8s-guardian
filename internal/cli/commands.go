@@ -16,6 +16,7 @@ import (
 	"github.com/andronaft/k8s-guardian/internal/cost"
 	"github.com/andronaft/k8s-guardian/internal/custom"
 	"github.com/andronaft/k8s-guardian/internal/diff"
+	"github.com/andronaft/k8s-guardian/internal/fsutil"
 	"github.com/andronaft/k8s-guardian/internal/quantity"
 	"github.com/andronaft/k8s-guardian/internal/report"
 	"github.com/andronaft/k8s-guardian/internal/rules"
@@ -49,7 +50,7 @@ func (a *App) diff(args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files)
+	files, err := loadFiles(f.files, a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -155,7 +156,7 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files)
+	files, err := loadFiles(f.files, a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -222,7 +223,7 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 			if err != nil {
 				return ExitError, err
 			}
-			if err := os.WriteFile(file.Source, out, 0o644); err != nil {
+			if err := fsutil.WriteFile(file.Source, out); err != nil {
 				return ExitError, err
 			}
 		}
@@ -343,7 +344,7 @@ func (a *App) runInteractive(f *flags) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
-	files, err := loadFiles(f.files)
+	files, err := loadFiles(f.files, a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -371,10 +372,12 @@ func (a *App) runInteractive(f *flags) (int, error) {
 			return ExitError, err
 		}
 		if f.stdout || !file.Writable {
-			a.Stdout.Write(out)
+			if _, err := a.Stdout.Write(out); err != nil {
+				return ExitError, err
+			}
 			continue
 		}
-		if err := os.WriteFile(file.Source, out, 0o644); err != nil {
+		if err := fsutil.WriteFile(file.Source, out); err != nil {
 			return ExitError, err
 		}
 		fmt.Fprintf(a.Stderr, "✏️  saved %s\n", file.Source)
@@ -474,7 +477,7 @@ func (a *App) ruleCreate(ctx context.Context, args []string) (int, error) {
 		if dryRun {
 			continue
 		}
-		if err := os.MkdirAll(out, 0o755); err != nil {
+		if err := fsutil.MkdirAll(out); err != nil {
 			return ExitError, err
 		}
 		// custom.Compile only accepts DNS-label names; double-check the
@@ -486,13 +489,13 @@ func (a *App) ruleCreate(ctx context.Context, args []string) (int, error) {
 		if _, err := os.Stat(path); err == nil && !force {
 			return ExitError, fmt.Errorf("%s already exists (use --force to overwrite)", path)
 		}
-		if err := os.WriteFile(path, y, 0o644); err != nil {
+		if err := fsutil.WriteFile(path, y); err != nil {
 			return ExitError, err
 		}
 		fmt.Fprintf(a.Stderr, "✏️  wrote %s (%s)\n", path, d.Spec.ID)
 	}
 	if len(f.files) > 0 {
-		files, err := loadFiles(f.files)
+		files, err := loadFiles(f.files, a.Stderr)
 		if err != nil {
 			return ExitError, err
 		}

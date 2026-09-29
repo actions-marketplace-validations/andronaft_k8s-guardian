@@ -102,7 +102,8 @@ func cell(s string) string {
 func WriteGitHubExtras(fs []rules.Finding) error {
 	s := Summarize(fs)
 	if path := os.Getenv("GITHUB_STEP_SUMMARY"); path != "" {
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		// Path set by the GitHub Actions runner.
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 G703 -- GITHUB_STEP_SUMMARY
 		if err != nil {
 			return err
 		}
@@ -113,7 +114,7 @@ func WriteGitHubExtras(fs []rules.Finding) error {
 		}
 	}
 	if path := os.Getenv("GITHUB_OUTPUT"); path != "" {
-		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+		f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600) // #nosec G304 G703 -- GITHUB_OUTPUT
 		if err != nil {
 			return err
 		}

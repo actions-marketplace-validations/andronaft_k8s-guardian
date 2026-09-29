@@ -9,6 +9,7 @@ import (
 
 	"github.com/andronaft/k8s-guardian/internal/custom"
 	"github.com/andronaft/k8s-guardian/internal/export"
+	"github.com/andronaft/k8s-guardian/internal/fsutil"
 )
 
 func (a *App) export(args []string) (int, error) {
@@ -71,8 +72,10 @@ func (a *App) export(args []string) (int, error) {
 		fmt.Fprintf(a.Stderr, "skipped %s\n", s)
 	}
 	if out == "" {
-		a.Stdout.Write(res.YAML)
-	} else if err := os.WriteFile(out, res.YAML, 0o644); err != nil {
+		if _, err := a.Stdout.Write(res.YAML); err != nil {
+			return ExitError, err
+		}
+	} else if err := fsutil.WriteFile(out, res.YAML); err != nil {
 		return ExitError, err
 	}
 	if target == "kyverno" {

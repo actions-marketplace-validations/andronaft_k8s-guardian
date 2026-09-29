@@ -315,3 +315,27 @@ func TestDirectoryWalkIsTolerantButNotBlind(t *testing.T) {
 		t.Errorf("a broken manifest must fail the check, got %d", code)
 	}
 }
+
+// A pull request must not be able to make the walk read or rewrite files
+// outside the repository through a symlink (e.g. k8s/app.yaml -> ~/.kube/config).
+func TestWalkNeverFollowsSymlinksOutOfTheRepo(t *testing.T) {
+	base := t.TempDir()
+	repo, outside := filepath.Join(base, "repo"), filepath.Join(base, "outside")
+	os.MkdirAll(filepath.Join(repo, "k8s"), 0o755)
+	os.MkdirAll(outside, 0o755)
+	secret := []byte("apiVersion: v1\nkind: Pod\nmetadata: {name: private}\nspec:\n  containers: [{name: c, image: nginx}]\n# token=supersecret\n")
+	target := filepath.Join(outside, "private.yaml")
+	os.WriteFile(target, secret, 0o600)
+	os.Symlink(target, filepath.Join(repo, "k8s", "app.yaml"))
+	os.Symlink(outside, filepath.Join(repo, "linked-dir"))
+	_, out, errOut := run(t, "check", "-f", repo, "--fix")
+	if data, _ := os.ReadFile(target); string(data) != string(secret) {
+		t.Fatalf("a file outside the repository was rewritten:\n%s", data)
+	}
+	if strings.Contains(out+errOut, "private") && !strings.Contains(errOut, "skipped symlink") {
+		t.Errorf("the symlinked file was read:\n%s\n%s", out, errOut)
+	}
+	if !strings.Contains(errOut, "skipped symlink") {
+		t.Errorf("expected a warning about skipped symlinks, got %q", errOut)
+	}
+}
