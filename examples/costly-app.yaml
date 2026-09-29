@@ -1,0 +1,47 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: shop
+  annotations:
+    example.com/contact: team-orders@example.com
+spec:
+  replicas: 4
+  selector:
+    matchLabels: {app: orders-api}
+  template:
+    metadata:
+      labels: {app: orders-api}
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/example/orders-api:2.3.1 # Go HTTP service
+          ports:
+            - {name: http, containerPort: 8080}
+          resources:
+            requests: {cpu: "4", memory: 8Gi}
+            limits: {memory: 8Gi}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: orders-api
+  namespace: shop
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: orders-api}
+  minReplicas: 4
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource: {name: cpu, target: {type: Utilization, averageUtilization: 70}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: orders-api
+  namespace: shop
+spec:
+  type: LoadBalancer
+  selector: {app: orders-api}
+  ports:
+    - {port: 80, targetPort: 8000}

@@ -1,0 +1,66 @@
+# Example custom rules. Copy to .k8s-guardian/rules/ (or pass --rules examples/rules)
+# or generate your own: k8s-guardian rule create "<policy in plain English>"
+apiVersion: k8s-guardian.io/v1
+kind: Rule
+metadata:
+  name: require-contact-email
+spec:
+  id: ORG001
+  severity: error
+  description: Every workload must carry a contact email annotation so on-call knows who owns it.
+  message: add metadata.annotations['example.com/contact'] with a valid email
+  match:
+    kinds: [Deployment, StatefulSet, DaemonSet, CronJob]
+    scope: resource
+  assert:
+    - path: metadata.annotations['example.com/contact']
+      op: matches
+      value: '^[^@\s]+@[^@\s]+\.[a-z]{2,}$'
+---
+apiVersion: k8s-guardian.io/v1
+kind: Rule
+metadata:
+  name: trusted-registries
+spec:
+  id: ORG002
+  severity: error
+  description: Images must come from the company registries.
+  match:
+    scope: container
+  assert:
+    - path: image
+      op: matches
+      value: '^(ghcr\.io/example/|registry\.example\.com/)'
+---
+apiVersion: k8s-guardian.io/v1
+kind: Rule
+metadata:
+  name: max-cpu-limit
+spec:
+  id: ORG003
+  severity: warning
+  description: No single container may request more than 4 CPUs without a capacity review.
+  match:
+    scope: container
+  assert:
+    - path: resources.requests.cpu
+      op: lte
+      value: "4"
+---
+apiVersion: k8s-guardian.io/v1
+kind: Rule
+metadata:
+  name: public-lb-needs-source-ranges
+spec:
+  id: ORG004
+  severity: error
+  description: LoadBalancer Services must restrict source IP ranges.
+  match:
+    kinds: [Service]
+  when:
+    - path: spec.type
+      op: equals
+      value: LoadBalancer
+  assert:
+    - path: spec.loadBalancerSourceRanges
+      op: exists

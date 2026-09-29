@@ -1,21 +1,16 @@
-// Package ai asks Claude to remediate findings that cannot be fixed
-// deterministically (probes, image tags, context-dependent settings).
+// Package ai contains the Claude-powered features of k8s-guardian: fixing
+// findings that have no deterministic fix, right-sizing resources and
+// generating custom rules from natural language.
 package ai
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
-	"regexp"
-	"strings"
 
 	"github.com/anthropics/anthropic-sdk-go"
 	"github.com/anthropics/anthropic-sdk-go/option"
-	"gopkg.in/yaml.v3"
-
-	"github.com/andronaft/k8s-guardian/internal/rules"
 )
 
 // DefaultModel is used unless --model or K8S_GUARDIAN_MODEL is set.
@@ -32,54 +27,34 @@ func Model(flagValue string) string {
 	return DefaultModel
 }
 
-const systemPrompt = `You are k8s-guardian, a senior Kubernetes platform and security engineer.
-You receive Kubernetes manifests together with policy findings and return a corrected version of the manifests.
-
-Rules for your answer:
-- Return the COMPLETE corrected YAML stream (all documents, separated by ---) inside exactly one fenced ` + "```yaml" + ` block, followed by a short bullet list explaining each change.
-- Fix every listed finding. Keep all unrelated fields, document order, key order and YAML comments intact.
-- Choose realistic values from context: probes should target a declared containerPort (httpGet for HTTP-looking ports/names such as http, web, 80, 8080, otherwise tcpSocket) with sensible initialDelaySeconds/periodSeconds; resource values should fit the workload type.
-- Never invent credentials, hostnames or image versions you cannot infer. When a safe value cannot be determined (for example the exact image version to pin), keep the field as is and add a YAML comment starting with "# TODO(k8s-guardian):" explaining what the user must decide.
-- If readOnlyRootFilesystem is enabled, add emptyDir volumes for paths the image obviously needs to write (for example /tmp, nginx cache/run directories).
-- Output must be valid Kubernetes YAML that can be applied with kubectl.`
-
-// Fixer calls the Claude API.
-type Fixer struct {
+// Client calls the Claude API. Credentials are resolved by the Anthropic SDK
+// (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or an `ant auth login` profile).
+type Client struct {
 	client anthropic.Client
 	model  string
 }
 
-// New creates a Fixer. Credentials are resolved by the Anthropic SDK
-// (ANTHROPIC_API_KEY, ANTHROPIC_AUTH_TOKEN or an `ant auth login` profile).
-func New(model string) *Fixer {
-	return &Fixer{client: anthropic.NewClient(), model: Model(model)}
+// New creates a Client for the given model ("" = default).
+func New(model string) *Client {
+	return &Client{client: anthropic.NewClient(), model: Model(model)}
 }
 
-var fence = regexp.MustCompile("(?s)```(?:yaml|yml)?\\s*\\n(.*?)```")
+// ModelName returns the model the client uses.
+func (c *Client) ModelName() string { return c.model }
 
-// Fix returns the corrected manifest and Claude's explanation.
-func (f *Fixer) Fix(ctx context.Context, manifest string, findings []rules.Finding) (fixed, notes string, err error) {
-	var b strings.Builder
-	b.WriteString("Findings reported by k8s-guardian:\n")
-	for _, fd := range findings {
-		fmt.Fprintf(&b, "- [%s %s/%s] %s", fd.Severity, fd.RuleID, fd.Rule, fd.Resource)
-		if fd.Container != "" {
-			fmt.Fprintf(&b, " container %q", fd.Container)
-		}
-		fmt.Fprintf(&b, ": %s\n", fd.Message)
+// request sends a conversation and returns the text of the reply. When schema
+// is non-nil the reply is constrained to JSON matching it (structured outputs).
+func (c *Client) request(ctx context.Context, system string, msgs []anthropic.MessageParam, schema map[string]any) (string, error) {
+	cfg := anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffortHigh}
+	if schema != nil {
+		cfg.Format = anthropic.JSONOutputFormatParam{Schema: schema}
 	}
-	b.WriteString("\nManifest:\n```yaml\n")
-	b.WriteString(manifest)
-	b.WriteString("\n```\n")
-
-	stream := f.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
-		Model:        anthropic.Model(f.model),
+	stream := c.client.Messages.NewStreaming(ctx, anthropic.MessageNewParams{
+		Model:        anthropic.Model(c.model),
 		MaxTokens:    64000,
-		System:       []anthropic.TextBlockParam{{Text: systemPrompt}},
-		OutputConfig: anthropic.OutputConfigParam{Effort: anthropic.OutputConfigEffortHigh},
-		Messages: []anthropic.MessageParam{
-			anthropic.NewUserMessage(anthropic.NewTextBlock(b.String())),
-		},
+		System:       []anthropic.TextBlockParam{{Text: system}},
+		OutputConfig: cfg,
+		Messages:     msgs,
 	},
 		// Server-side fallback: if a request is declined by a safety
 		// classifier, the API re-serves it on a suitable fallback model.
@@ -89,47 +64,43 @@ func (f *Fixer) Fix(ctx context.Context, manifest string, findings []rules.Findi
 	msg := anthropic.Message{}
 	for stream.Next() {
 		if err := msg.Accumulate(stream.Current()); err != nil {
-			return "", "", err
+			return "", err
 		}
 	}
 	if err := stream.Err(); err != nil {
 		var apiErr *anthropic.Error
 		if errors.As(err, &apiErr) && apiErr.StatusCode == 401 {
-			return "", "", fmt.Errorf("Claude API authentication failed: set ANTHROPIC_API_KEY (or run `ant auth login`): %w", err)
+			return "", fmt.Errorf("Claude API authentication failed: set ANTHROPIC_API_KEY (or run `ant auth login`): %w", err)
 		}
-		return "", "", fmt.Errorf("Claude API: %w", err)
+		return "", fmt.Errorf("Claude API: %w", err)
 	}
 	switch msg.StopReason {
 	case anthropic.StopReasonRefusal:
-		return "", "", errors.New("Claude declined to process this manifest")
+		return "", errors.New("Claude declined the request")
 	case anthropic.StopReasonMaxTokens:
-		return "", "", errors.New("Claude response was truncated (manifest too large); fix files individually")
+		return "", errors.New("Claude response was truncated (input too large); try fewer files at once")
 	}
-
-	var text strings.Builder
+	var text string
 	for _, block := range msg.Content {
 		if t, ok := block.AsAny().(anthropic.TextBlock); ok {
-			text.WriteString(t.Text)
+			text += t.Text
 		}
 	}
-	out := text.String()
-	m := fence.FindStringSubmatchIndex(out)
-	if m == nil {
-		return "", "", errors.New("Claude did not return a YAML block")
-	}
-	fixed = out[m[2]:m[3]]
-	notes = strings.TrimSpace(out[m[1]:])
+	return text, nil
+}
 
-	// Make sure the answer is at least syntactically valid YAML.
-	dec := yaml.NewDecoder(strings.NewReader(fixed))
-	for {
-		var n yaml.Node
-		if err := dec.Decode(&n); err != nil {
-			if errors.Is(err, io.EOF) {
-				break
-			}
-			return "", "", fmt.Errorf("Claude returned invalid YAML: %w", err)
-		}
+func userText(s string) anthropic.MessageParam {
+	return anthropic.NewUserMessage(anthropic.NewTextBlock(s))
+}
+
+func strArray() map[string]any {
+	return map[string]any{"type": "array", "items": map[string]any{"type": "string"}}
+}
+
+func object(props map[string]any) map[string]any {
+	req := make([]string, 0, len(props))
+	for k := range props {
+		req = append(req, k)
 	}
-	return fixed, notes, nil
+	return map[string]any{"type": "object", "properties": props, "required": req, "additionalProperties": false}
 }

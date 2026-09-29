@@ -136,7 +136,7 @@ func schema(props map[string]any, required ...string) map[string]any {
 	return map[string]any{"type": "object", "properties": props, "required": required}
 }
 
-var tools = []map[string]any{
+var baseTools = []map[string]any{
 	{
 		"name":        "validate_manifest",
 		"description": "Validate Kubernetes YAML (one or more documents) against k8s-guardian guardrails: resource requests/limits, non-root, privilege escalation, capabilities, probes, pinned image tags, host namespaces, seccomp and more. Returns a list of findings.",
@@ -169,31 +169,12 @@ var tools = []map[string]any{
 	},
 }
 
-func (s *Server) callTool(ctx context.Context, name string, raw json.RawMessage) (string, bool) {
-	var args struct {
-		YAML      string `json:"yaml"`
-		Skip      string `json:"skip"`
-		UseAI     bool   `json:"use_ai"`
-		Resource  string `json:"resource"`
-		Namespace string `json:"namespace"`
+func (s *Server) callBaseTool(ctx context.Context, name string, args toolArgs) (string, bool) {
+	opts, err := loadOptions(args.Skip)
+	if err != nil {
+		return err.Error(), true
 	}
-	if len(raw) > 0 {
-		if err := json.Unmarshal(raw, &args); err != nil {
-			return "invalid arguments: " + err.Error(), true
-		}
-	}
-	opts := rules.NewOptions(args.Skip)
 	switch name {
-	case "list_rules":
-		var b strings.Builder
-		for _, r := range rules.All {
-			fix := "manual/AI"
-			if r.Fix != nil {
-				fix = "auto"
-			}
-			fmt.Fprintf(&b, "%s %-32s %-7s fix:%-9s %s\n", r.ID, r.Name, r.Severity, fix, r.Description)
-		}
-		return b.String(), false
 	case "validate_manifest":
 		f, err := manifest.Parse([]byte(args.YAML), "input.yaml")
 		if err != nil {

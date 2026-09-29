@@ -22,3 +22,5 @@ jobs:
         run: |
           ./bin/k8s-guardian check -f examples/secure-deployment.yaml
           ! ./bin/k8s-guardian check -f examples/insecure-deployment.yaml
+          ./bin/k8s-guardian rule validate examples/rules
+          ./bin/k8s-guardian cost -f examples/costly-app.yaml

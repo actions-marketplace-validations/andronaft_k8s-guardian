@@ -85,7 +85,8 @@ func (f *File) addObject(root *yaml.Node) {
 			return
 		}
 	}
-	if o.Kind() == "" {
+	// Skip empty documents and k8s-guardian's own custom rule files.
+	if o.Kind() == "" || strings.HasPrefix(o.APIVersion(), "k8s-guardian.io/") {
 		return
 	}
 	f.Objects = append(f.Objects, o)

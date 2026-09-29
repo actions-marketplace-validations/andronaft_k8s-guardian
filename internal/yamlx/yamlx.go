@@ -117,3 +117,11 @@ func Seq(values ...string) *yaml.Node {
 	}
 	return n
 }
+
+// Items returns the elements of a sequence node (nil-safe).
+func Items(n *yaml.Node) []*yaml.Node {
+	if n == nil || n.Kind != yaml.SequenceNode {
+		return nil
+	}
+	return n.Content
+}

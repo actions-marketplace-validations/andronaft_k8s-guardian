@@ -13,7 +13,13 @@ const IgnoreAnnotation = "k8s-guardian.io/ignore"
 
 // Options controls which rules run.
 type Options struct {
-	Skip map[string]bool // rule IDs/names (lower-case)
+	Skip   map[string]bool // rule IDs/names (lower-case)
+	Custom []*Rule         // user-defined rules, run after the built-ins
+}
+
+// Rules returns the built-in rules followed by custom rules.
+func (o Options) Rules() []*Rule {
+	return append(append([]*Rule{}, All...), o.Custom...)
 }
 
 // NewOptions builds Options from a comma separated skip list.
@@ -27,7 +33,8 @@ func NewOptions(skip string) Options {
 	return o
 }
 
-func (o Options) enabled(r *Rule, obj *manifest.Object) bool {
+// Enabled reports whether rule r should run for obj.
+func (o Options) Enabled(r *Rule, obj *manifest.Object) bool {
 	if o.Skip[strings.ToLower(r.ID)] || o.Skip[strings.ToLower(r.Name)] {
 		return false
 	}
@@ -45,11 +52,16 @@ func Validate(objs []*manifest.Object, opts Options) []Finding {
 	var out []Finding
 	for _, o := range objs {
 		t := NewTarget(o)
-		if t == nil {
-			continue
-		}
-		for _, r := range All {
-			if !opts.enabled(r, o) {
+		for _, r := range opts.Rules() {
+			if !opts.Enabled(r, o) {
+				continue
+			}
+			if r.Resource != nil {
+				for _, msg := range r.Resource(o, objs) {
+					out = append(out, newResourceFinding(r, o, msg))
+				}
+			}
+			if t == nil {
 				continue
 			}
 			if r.Pod != nil {
@@ -84,8 +96,8 @@ func Fix(objs []*manifest.Object, opts Options) int {
 		if t == nil {
 			continue
 		}
-		for _, r := range All {
-			if r.Fix == nil || !opts.enabled(r, o) {
+		for _, r := range opts.Rules() {
+			if r.Fix == nil || !opts.Enabled(r, o) {
 				continue
 			}
 			if r.Pod != nil && r.Pod(t) != "" && r.Fix(t, nil) {
@@ -120,4 +132,17 @@ func newFinding(r *Rule, t *Target, c *Container, msg string) Finding {
 		f.Line = c.Node.Line
 	}
 	return f
+}
+
+func newResourceFinding(r *Rule, o *manifest.Object, msg string) Finding {
+	return Finding{
+		RuleID:    r.ID,
+		Rule:      r.Name,
+		Severity:  r.Severity,
+		Message:   msg,
+		Source:    o.Source,
+		Resource:  o.Ref(),
+		Namespace: o.Namespace(),
+		Line:      o.Root.Line,
+	}
 }

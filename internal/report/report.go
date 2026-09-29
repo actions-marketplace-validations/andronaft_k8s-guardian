@@ -139,12 +139,17 @@ func writeText(w io.Writer, fs []rules.Finding, s Summary, fixMode bool) {
 	}
 }
 
+var extraRules []*rules.Rule
+
+// RegisterRules adds non built-in rules (live, diff) to SARIF output.
+func RegisterRules(rs ...*rules.Rule) { extraRules = append(extraRules, rs...) }
+
 func writeSARIF(w io.Writer, fs []rules.Finding) error {
 	type msg struct {
 		Text string `json:"text"`
 	}
 	var sarifRules []map[string]any
-	for _, r := range rules.All {
+	for _, r := range append(append([]*rules.Rule{}, rules.All...), extraRules...) {
 		sarifRules = append(sarifRules, map[string]any{
 			"id":               r.ID,
 			"name":             r.Name,
