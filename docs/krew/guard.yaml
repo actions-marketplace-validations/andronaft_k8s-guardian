@@ -23,6 +23,13 @@ spec:
       kubectl guard deployment/my-app -n prod
       kubectl guard -f deployment.yaml --fix
       kubectl guard diff -f deployment.yaml -n prod
+  caveats: |
+    Checking local files works offline. Some features need extra setup:
+      * --live, audit and diff read the cluster of your current kubeconfig
+        (read-only, via kubectl).
+      * --ai and "rule create" call the Anthropic API and need
+        ANTHROPIC_API_KEY. Secrets are never sent.
+      * cost --usage needs metrics-server or Prometheus (--prometheus URL).
   platforms:
     - selector:
         matchLabels:

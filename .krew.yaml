@@ -11,15 +11,25 @@ spec:
   homepage: https://github.com/andronaft/k8s-guardian
   shortDescription: Validate and auto-fix workloads against security guardrails
   description: |
-    k8s-guardian audits Kubernetes manifests, Helm charts and live cluster
-    resources for missing resource requests/limits, root containers,
-    privilege escalation, missing probes, mutable image tags, host
-    namespaces and more. It fixes most findings automatically while keeping
-    your YAML comments, and can use Claude to fix the rest (--fix --ai).
+    kubectl guard audits Kubernetes manifests, Helm charts, Kustomize
+    overlays and live cluster resources for missing resource requests and
+    limits, root containers, privilege escalation, missing probes, mutable
+    image tags, host namespaces and more. It fixes most findings
+    automatically while keeping YAML comments, checks whether a manifest
+    fits the target cluster (quotas, node capacity, LimitRanges, missing
+    ConfigMaps/Secrets) and flags breaking changes against what is deployed.
 
     Examples:
       kubectl guard deployment/my-app -n prod
       kubectl guard -f deployment.yaml --fix
+      kubectl guard diff -f deployment.yaml -n prod
+  caveats: |
+    Checking local files works offline. Some features need extra setup:
+      * --live, audit and diff read the cluster of your current kubeconfig
+        (read-only, via kubectl).
+      * --ai and "rule create" call the Anthropic API and need
+        ANTHROPIC_API_KEY. Secrets are never sent.
+      * cost --usage needs metrics-server or Prometheus (--prometheus URL).
   platforms:
     - selector:
         matchLabels: {os: linux, arch: amd64}
