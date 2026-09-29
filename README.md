@@ -50,8 +50,9 @@ make build && sudo make install
 # Docker (multi-arch, published to GHCR on every release)
 docker run --rm -v "$PWD:/work" ghcr.io/andronaft/k8s-guardian check -f .
 
-# Krew: from the manifest in this repo (until it is listed in krew-index)
-kubectl krew install --manifest-url=https://raw.githubusercontent.com/andronaft/k8s-guardian/main/docs/krew/guard.yaml
+# Krew: installs the plugin as `kubectl guard-workloads` (the Krew name);
+# from the manifest in this repo until it is listed in krew-index
+kubectl krew install --manifest-url=https://raw.githubusercontent.com/andronaft/k8s-guardian/main/docs/krew/guard-workloads.yaml
 ```
 
 ## 🚀 Quick tour
