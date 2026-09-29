@@ -16,11 +16,45 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make lint
-      - run: make test
+      - name: Test (race detector)
+        run: go test -race ./...
       - run: make build
       - name: Self-check examples
         run: |
           ./bin/k8s-guardian check -f examples/secure-deployment.yaml
-          ! ./bin/k8s-guardian check -f examples/insecure-deployment.yaml
+          if ./bin/k8s-guardian check -f examples/insecure-deployment.yaml; then
+            echo "expected findings for the insecure example"; exit 1
+          fi
           ./bin/k8s-guardian rule validate examples/rules
           ./bin/k8s-guardian cost -f examples/costly-app.yaml
+          ./bin/kubectl-guard version
+
+  # Exercises the GitHub Action defined in action.yml.
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Secure manifest passes
+        id: secure
+        uses: ./
+        with:
+          path: examples/secure-deployment.yaml
+          cost: "true"
+      - name: Insecure manifest fails with annotations
+        id: insecure
+        continue-on-error: true
+        uses: ./
+        with:
+          path: examples/insecure-deployment.yaml examples/costly-app.yaml
+          rules: examples/rules
+          sarif-file: k8s-guardian.sarif
+      - name: Verify outcomes
+        env:
+          SECURE_ERRORS: ${{ steps.secure.outputs.errors }}
+          INSECURE_OUTCOME: ${{ steps.insecure.outcome }}
+          INSECURE_ERRORS: ${{ steps.insecure.outputs.errors }}
+        run: |
+          test "$SECURE_ERRORS" = "0"
+          test "$INSECURE_OUTCOME" = "failure"
+          test "$INSECURE_ERRORS" -gt 0
+          jq -e '.runs[0].results | length > 0' k8s-guardian.sarif

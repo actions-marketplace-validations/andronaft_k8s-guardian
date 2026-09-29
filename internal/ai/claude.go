@@ -70,15 +70,15 @@ func (c *Client) request(ctx context.Context, system string, msgs []anthropic.Me
 	if err := stream.Err(); err != nil {
 		var apiErr *anthropic.Error
 		if errors.As(err, &apiErr) && apiErr.StatusCode == 401 {
-			return "", fmt.Errorf("Claude API authentication failed: set ANTHROPIC_API_KEY (or run `ant auth login`): %w", err)
+			return "", fmt.Errorf("authentication with the Claude API failed: set ANTHROPIC_API_KEY (or run `ant auth login`): %w", err)
 		}
-		return "", fmt.Errorf("Claude API: %w", err)
+		return "", fmt.Errorf("calling the Claude API: %w", err)
 	}
 	switch msg.StopReason {
 	case anthropic.StopReasonRefusal:
-		return "", errors.New("Claude declined the request")
+		return "", errors.New("the request was declined by Claude")
 	case anthropic.StopReasonMaxTokens:
-		return "", errors.New("Claude response was truncated (input too large); try fewer files at once")
+		return "", errors.New("the response from Claude was truncated (input too large); try fewer files at once")
 	}
 	var text string
 	for _, block := range msg.Content {

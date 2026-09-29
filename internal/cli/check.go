@@ -20,7 +20,7 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	var f flags
 	fs := a.flagSet("check", "check -f <file|dir|chart|-> [--fix [--ai]] [--live [-n ns]] [flags]")
 	f.input(fs)
-	f.output(fs, "text, json, sarif")
+	f.output(fs, "text, json, sarif, github, markdown")
 	f.ruleFlags(fs)
 	f.aiFlags(fs, "with --fix: let Claude fix findings that have no deterministic fix (probes, image tags, custom rules, ...)")
 	f.cluster(fs)
@@ -67,7 +67,7 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 func (a *App) audit(ctx context.Context, args []string) (int, error) {
 	var f flags
 	fs := a.flagSet("audit", "audit <resource>[/<name>] [-n ns] [--fix [--ai]] [flags]\n\nExamples:\n  audit deployment/my-app -n prod\n  audit deployments,statefulsets -A")
-	f.output(fs, "text, json, sarif")
+	f.output(fs, "text, json, sarif, github, markdown")
 	f.ruleFlags(fs)
 	f.aiFlags(fs, "with --fix: let Claude fix findings that have no deterministic fix")
 	f.cluster(fs)
@@ -120,6 +120,9 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 		if err := report.Write(a.Stdout, f.format, fs, report.Summarize(fs), false); err != nil {
 			return ExitError, err
 		}
+		if err := githubExtras(f.format, fs); err != nil {
+			return ExitError, err
+		}
 		return exitCode(fs, failOn), nil
 	}
 
@@ -167,8 +170,23 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 	}
 	s := report.Summarize(remaining)
 	s.Fixed = fixed
-	if err := report.Write(a.Stderr, f.format, remaining, s, true); err != nil {
+	out := a.Stderr
+	if f.format == "github" && len(fixedYAML) == 0 {
+		out = a.Stdout // the runner reads workflow commands from stdout
+	}
+	if err := report.Write(out, f.format, remaining, s, true); err != nil {
+		return ExitError, err
+	}
+	if err := githubExtras(f.format, remaining); err != nil {
 		return ExitError, err
 	}
 	return exitCode(remaining, failOn), nil
+}
+
+// githubExtras writes the job summary and step outputs for --format github.
+func githubExtras(format string, fs []rules.Finding) error {
+	if format != "github" {
+		return nil
+	}
+	return report.WriteGitHubExtras(fs)
 }

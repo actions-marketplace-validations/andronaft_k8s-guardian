@@ -1,0 +1,132 @@
+name: k8s-guardian Kubernetes Guardrails
+description: Validate Kubernetes manifests and Helm charts (security, resources, probes, custom policies, live cluster fit) with inline PR annotations.
+author: andronaft
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  path:
+    description: Files, directories or Helm charts to check (whitespace separated).
+    required: false
+    default: "."
+  fail-on:
+    description: Fail when findings at or above this severity remain (error, warning, info).
+    required: false
+    default: error
+  skip:
+    description: Comma separated rule IDs or names to skip, e.g. "KG006,KG015".
+    required: false
+    default: ""
+  rules:
+    description: Custom rule files or directories (whitespace separated). .k8s-guardian/rules is loaded automatically.
+    required: false
+    default: ""
+  live:
+    description: Also validate against the cluster of the current kubeconfig (quotas, node capacity, LimitRanges, missing references, CRDs). Requires cluster credentials in the job.
+    required: false
+    default: "false"
+  namespace:
+    description: Namespace for objects without one (used with live).
+    required: false
+    default: ""
+  sarif-file:
+    description: Also write a SARIF report to this path (upload it with github/codeql-action/upload-sarif).
+    required: false
+    default: ""
+  cost:
+    description: Add a monthly cost estimate of the workloads to the job summary.
+    required: false
+    default: "false"
+  args:
+    description: Extra arguments passed to `k8s-guardian check`.
+    required: false
+    default: ""
+
+outputs:
+  errors:
+    description: Number of error findings.
+    value: ${{ steps.check.outputs.errors }}
+  warnings:
+    description: Number of warning findings.
+    value: ${{ steps.check.outputs.warnings }}
+  infos:
+    description: Number of info findings.
+    value: ${{ steps.check.outputs.infos }}
+  fixable:
+    description: Number of findings that `k8s-guardian check --fix` can fix automatically.
+    value: ${{ steps.check.outputs.fixable }}
+  sarif-file:
+    description: Path of the SARIF report (when sarif-file is set).
+    value: ${{ steps.check.outputs.sarif-file }}
+
+runs:
+  using: composite
+  steps:
+    - name: Detect Go
+      id: go
+      shell: bash
+      run: |
+        if command -v go >/dev/null 2>&1; then echo "present=true" >> "$GITHUB_OUTPUT"; else echo "present=false" >> "$GITHUB_OUTPUT"; fi
+
+    - name: Set up Go
+      if: steps.go.outputs.present != 'true'
+      uses: actions/setup-go@v5
+      with:
+        go-version-file: ${{ github.action_path }}/go.mod
+        cache: false
+
+    - name: Build k8s-guardian
+      shell: bash
+      env:
+        GOTOOLCHAIN: auto
+        GOFLAGS: -mod=readonly
+      run: |
+        ext=""
+        if [ "$RUNNER_OS" = "Windows" ]; then ext=".exe"; fi
+        cd "$GITHUB_ACTION_PATH" || exit 1
+        go build -o "$RUNNER_TEMP/k8s-guardian-bin/k8s-guardian$ext" ./cmd/k8s-guardian
+        echo "$RUNNER_TEMP/k8s-guardian-bin" >> "$GITHUB_PATH"
+
+    - name: Run k8s-guardian
+      id: check
+      shell: bash
+      env:
+        INPUT_PATH: ${{ inputs.path }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
+        INPUT_SKIP: ${{ inputs.skip }}
+        INPUT_RULES: ${{ inputs.rules }}
+        INPUT_LIVE: ${{ inputs.live }}
+        INPUT_NAMESPACE: ${{ inputs.namespace }}
+        INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
+        INPUT_COST: ${{ inputs.cost }}
+        INPUT_ARGS: ${{ inputs.args }}
+      run: |
+        set -uo pipefail
+        files=()
+        for p in $INPUT_PATH; do files+=(-f "$p"); done
+        args=()
+        if [ -n "$INPUT_SKIP" ]; then args+=(--skip "$INPUT_SKIP"); fi
+        for r in $INPUT_RULES; do args+=(--rules "$r"); done
+        if [ "$INPUT_LIVE" = "true" ]; then args+=(--live); fi
+        if [ -n "$INPUT_NAMESPACE" ]; then args+=(-n "$INPUT_NAMESPACE"); fi
+        # shellcheck disable=SC2206 # extra args are intentionally word-split
+        extra=($INPUT_ARGS)
+
+        if [ -n "$INPUT_SARIF_FILE" ]; then
+          k8s-guardian check "${files[@]}" "${args[@]}" "${extra[@]}" --format sarif --fail-on info > "$INPUT_SARIF_FILE" || true
+          echo "sarif-file=$INPUT_SARIF_FILE" >> "$GITHUB_OUTPUT"
+        fi
+
+        code=0
+        k8s-guardian check "${files[@]}" "${args[@]}" "${extra[@]}" --format github --fail-on "$INPUT_FAIL_ON" || code=$?
+
+        if [ "$INPUT_COST" = "true" ]; then
+          {
+            echo "### 💰 Estimated monthly cost"
+            echo '```text'
+            k8s-guardian cost "${files[@]}" || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+        fi
+        exit "$code"

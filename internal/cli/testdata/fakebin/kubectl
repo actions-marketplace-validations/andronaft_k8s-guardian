@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Minimal fake kubectl for exercising k8s-guardian's cluster integration.
+args="$*"
+args="${args% --context *}"
+case "$args" in
+  "version -o json") echo '{"serverVersion":{"gitVersion":"v1.29.4"}}' ;;
+  "api-versions") printf 'v1\napps/v1\nbatch/v1\nautoscaling/v2\npolicy/v1\nnetworking.k8s.io/v1\n' ;;
+  "config view --minify -o jsonpath={..namespace}") echo "" ;;
+  "get nodes -o json") echo '{"items":[{"metadata":{"name":"node-a","labels":{"pool":"general"}},"spec":{},"status":{"allocatable":{"cpu":"3920m","memory":"15Gi"}}},{"metadata":{"name":"node-b","labels":{"pool":"general"}},"spec":{},"status":{"allocatable":{"cpu":"3920m","memory":"15Gi"}}}]}' ;;
+  "get namespace shop -o name") echo "namespace/shop" ;;
+  "get resourcequota -n shop -o json") echo '{"items":[{"metadata":{"name":"shop-compute"},"status":{"hard":{"requests.cpu":"12","requests.memory":"32Gi","pods":"30"},"used":{"requests.cpu":"3","requests.memory":"6Gi","pods":"5"}}}]}' ;;
+  "get limitrange -n shop -o json") echo '{"items":[{"metadata":{"name":"shop-limits"},"spec":{"limits":[{"type":"Container","max":{"cpu":"2","memory":"4Gi"},"defaultRequest":{"cpu":"100m","memory":"128Mi"},"default":{"memory":"256Mi"}}]}}]}' ;;
+  "get configmaps,secrets,serviceaccounts,persistentvolumeclaims -n shop -o name") printf 'configmap/kube-root-ca.crt\nserviceaccount/default\nsecret/orders-db\n' ;;
+  "get storageclasses -o json") echo '{"items":[{"metadata":{"name":"standard","annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}]}' ;;
+  "get priorityclasses -o name") echo "priorityclass.scheduling.k8s.io/high" ;;
+  "get deployment.apps/orders-api -o yaml -n shop")
+    cat <<'Y'
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orders-api
+  namespace: shop
+  uid: 123
+  resourceVersion: "999"
+  annotations:
+    example.com/contact: team-orders@example.com
+spec:
+  replicas: 2
+  strategy: {type: RollingUpdate}
+  selector:
+    matchLabels: {app: orders}
+  template:
+    metadata:
+      labels: {app: orders-api}
+    spec:
+      containers:
+        - name: api
+          image: ghcr.io/example/orders-api:2.2.0
+          ports: [{name: http, containerPort: 8080, protocol: TCP}]
+          resources:
+            requests: {cpu: 500m, memory: 512Mi}
+            limits: {memory: 512Mi}
+status:
+  replicas: 2
+Y
+    ;;
+  "get service/orders-api -o yaml -n shop")
+    cat <<'Y'
+apiVersion: v1
+kind: Service
+metadata: {name: orders-api, namespace: shop}
+spec:
+  type: LoadBalancer
+  clusterIP: 10.96.0.12
+  selector: {app: orders-api}
+  ports: [{port: 443, targetPort: 8000, protocol: TCP}]
+Y
+    ;;
+  *) echo "Error from server (NotFound): $args not found" >&2; exit 1 ;;
+esac

@@ -23,21 +23,21 @@ spec:
   platforms:
     - selector:
         matchLabels: {os: linux, arch: amd64}
-      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ trimPrefix .TagName \"v\" }}_linux_amd64.tar.gz" .TagName }}
+      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ .TagName }}_linux_amd64.tar.gz" .TagName }}
       bin: kubectl-guard
     - selector:
         matchLabels: {os: linux, arch: arm64}
-      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ trimPrefix .TagName \"v\" }}_linux_arm64.tar.gz" .TagName }}
+      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ .TagName }}_linux_arm64.tar.gz" .TagName }}
       bin: kubectl-guard
     - selector:
         matchLabels: {os: darwin, arch: amd64}
-      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ trimPrefix .TagName \"v\" }}_darwin_amd64.tar.gz" .TagName }}
+      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ .TagName }}_darwin_amd64.tar.gz" .TagName }}
       bin: kubectl-guard
     - selector:
         matchLabels: {os: darwin, arch: arm64}
-      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ trimPrefix .TagName \"v\" }}_darwin_arm64.tar.gz" .TagName }}
+      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ .TagName }}_darwin_arm64.tar.gz" .TagName }}
       bin: kubectl-guard
     - selector:
         matchLabels: {os: windows, arch: amd64}
-      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ trimPrefix .TagName \"v\" }}_windows_amd64.zip" .TagName }}
+      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ .TagName }}_windows_amd64.zip" .TagName }}
       bin: kubectl-guard.exe

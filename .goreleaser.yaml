@@ -29,7 +29,8 @@ archives:
     files: [LICENSE, README.md]
   - id: kubectl-guard
     ids: [kubectl-guard]
-    name_template: "kubectl-guard_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Uses the tag (e.g. v0.3.0) so .krew.yaml can build URLs from {{ .TagName }}.
+    name_template: "kubectl-guard_{{ .Tag }}_{{ .Os }}_{{ .Arch }}"
     formats: [tar.gz]
     format_overrides:
       - goos: windows

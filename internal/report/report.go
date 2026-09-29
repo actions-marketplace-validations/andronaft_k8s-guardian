@@ -54,11 +54,17 @@ func Write(w io.Writer, format string, fs []rules.Finding, s Summary, fixMode bo
 		}{fs, s})
 	case "sarif":
 		return writeSARIF(w, fs)
+	case "github":
+		WriteGitHub(w, fs)
+		return nil
+	case "markdown", "md":
+		WriteMarkdown(w, fs, s)
+		return nil
 	case "text", "":
 		writeText(w, fs, s, fixMode)
 		return nil
 	}
-	return fmt.Errorf("unknown output format %q (use text, json or sarif)", format)
+	return fmt.Errorf("unknown output format %q (use text, json, sarif, github or markdown)", format)
 }
 
 var color = func() bool {

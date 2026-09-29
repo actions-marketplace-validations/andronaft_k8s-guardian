@@ -27,7 +27,7 @@ Most Kubernetes linters are static: they read a YAML file and print an error. `k
 | 📜 | **Policies from plain language**: *"forbid :latest and require a contact email"* becomes a validated rule | `rule create "…"` |
 | 🔌 | **kubectl plugin** | `kubectl guard …` |
 | 🧠 | **MCP server** for Claude Code / Cursor: validate, fix, live-check, diff, cost, custom rules | `mcp` |
-| ⚡ | **CI-ready**: single static binary, exit codes, JSON and SARIF output, pre-commit hooks | |
+| ⚡ | **GitHub Action & CI**: inline PR annotations, job summary, SARIF, exit codes, pre-commit hooks | `uses: andronaft/k8s-guardian@…` |
 
 ---
 
@@ -254,24 +254,78 @@ Then ask your agent: *"Write a Deployment for the orders API, make sure it passe
 * Claude is told never to invent image versions, hosts or secrets. Where it can't decide safely, it leaves a `# TODO(k8s-guardian):` comment. **Review AI changes before applying them.**
 * Credentials come from `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` or an `ant auth login` profile. Nothing is sent unless you pass `--ai`, `rule create` or `use_ai`.
 
-## ⚙️ CI/CD
+## ⚙️ GitHub Action
+
+Findings appear as **annotations directly on the PR diff**, together with a Markdown job summary (and an optional cost estimate):
 
 ```yaml
-# GitHub Actions + code scanning
-- run: go install github.com/andronaft/k8s-guardian/cmd/k8s-guardian@latest
-- run: k8s-guardian check -f k8s/ --format sarif > k8s-guardian.sarif || true
-- uses: github/codeql-action/upload-sarif@v3
-  with: {sarif_file: k8s-guardian.sarif}
-- run: k8s-guardian check -f k8s/ --fail-on error
-# with cluster credentials, block breaking changes before deploy:
-- run: k8s-guardian diff -f k8s/ -n prod && k8s-guardian check -f k8s/ --live -n prod
+# .github/workflows/k8s-guardian.yml
+name: k8s-guardian
+on: [pull_request]
+permissions:
+  contents: read
+jobs:
+  guardrails:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: andronaft/k8s-guardian@main   # pin to a release tag once published
+        with:
+          path: k8s/ charts/my-app     # files, directories or Helm charts
+          fail-on: error               # error | warning | info
+          skip: KG015                  # optional
+          cost: "true"                 # add $/month to the job summary
 ```
+
+| Input | Default | Description |
+|-------|---------|-------------|
+| `path` | `.` | Files, directories or Helm charts (whitespace separated) |
+| `fail-on` | `error` | Fail when findings at or above this severity remain |
+| `skip` | | Comma-separated rule IDs or names to skip |
+| `rules` | | Custom rule files or directories (`.k8s-guardian/rules` is always loaded) |
+| `live` | `false` | Also check against the cluster in the job's kubeconfig (`--live`) |
+| `namespace` | | Namespace for objects without one |
+| `sarif-file` | | Also write SARIF, for `github/codeql-action/upload-sarif` |
+| `cost` | `false` | Add a monthly cost estimate to the job summary |
+| `args` | | Extra arguments for `k8s-guardian check` |
+
+Outputs: `errors`, `warnings`, `infos`, `fixable`, `sarif-file`.
+
+<details>
+<summary>Code scanning (SARIF) and pre-deploy checks</summary>
+
+```yaml
+permissions:
+  contents: read
+  security-events: write
+steps:
+  - uses: actions/checkout@v4
+  - uses: andronaft/k8s-guardian@main
+    with:
+      path: k8s/
+      sarif-file: k8s-guardian.sarif
+  - uses: github/codeql-action/upload-sarif@v3
+    if: always()
+    with:
+      sarif_file: k8s-guardian.sarif
+```
+
+With cluster credentials in the job, you can block breaking changes before deploying:
+
+```yaml
+  - uses: andronaft/k8s-guardian@main          # also puts k8s-guardian on PATH
+    with: {path: k8s/, live: "true", namespace: prod}
+  - run: k8s-guardian diff -f k8s/ -n prod --format github
+```
+</details>
+
+Outside GitHub, use `--format github|markdown|sarif|json` in any CI. There is also a pre-commit hook:
 
 ```yaml
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/andronaft/k8s-guardian
-    rev: v0.3.0
+    rev: main          # pin to a release tag once published
     hooks:
       - id: k8s-guardian        # or k8s-guardian-fix
         files: ^k8s/.*\.ya?ml$
@@ -283,6 +337,7 @@ Exit codes: `0` passed, `1` findings at or above `--fail-on` (default `error`), 
 
 ```text
 cmd/k8s-guardian     one binary: CLI, kubectl-guard plugin, MCP server
+action.yml           GitHub Action (composite, builds from source)
 internal/rules       rule engine + 17 built-in rules and deterministic fixes
 internal/custom      declarative custom-rule DSL (paths, when/assert, ops)
 internal/live        cluster-aware checks (quota, nodes, LimitRange, references)
@@ -298,7 +353,7 @@ internal/mcp         MCP stdio server
 
 - [x] v0.1: CLI validator, `--fix`, AI fix, kubectl plugin
 - [x] v0.2: MCP server
-- [x] v0.3: live cluster context, interactive TUI, breaking-change diff, cost estimation, natural-language rules
+- [x] v0.3: live cluster context, interactive TUI, breaking-change diff, cost estimation, natural-language rules, GitHub Action
 - [ ] Real usage data for right-sizing (metrics-server / Prometheus)
 - [ ] Kustomize support (`-k`)
 - [ ] Export custom rules to Kyverno / ValidatingAdmissionPolicy (CEL)

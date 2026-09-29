@@ -225,7 +225,7 @@ func FetchAI(ctx context.Context, client *ai.Client, p *Proposal) (root *yaml.No
 		return nil, base, "", err
 	}
 	if len(f.Objects) == 0 {
-		return nil, base, "", fmt.Errorf("Claude returned no Kubernetes object")
+		return nil, base, "", fmt.Errorf("no Kubernetes object in the answer from Claude")
 	}
 	return f.Objects[0].Root, base, notes, nil
 }

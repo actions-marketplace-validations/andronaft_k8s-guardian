@@ -48,7 +48,7 @@ func (c *Client) Fix(ctx context.Context, manifest string, findings []rules.Find
 	}
 	m := fence.FindStringSubmatchIndex(out)
 	if m == nil {
-		return "", "", errors.New("Claude did not return a YAML block")
+		return "", "", errors.New("no YAML block in the answer from Claude")
 	}
 	fixed = out[m[2]:m[3]]
 	notes = strings.TrimSpace(out[m[1]:])
@@ -61,7 +61,7 @@ func (c *Client) Fix(ctx context.Context, manifest string, findings []rules.Find
 			if errors.Is(err, io.EOF) {
 				break
 			}
-			return "", "", fmt.Errorf("Claude returned invalid YAML: %w", err)
+			return "", "", fmt.Errorf("invalid YAML in the answer from Claude: %w", err)
 		}
 	}
 	return fixed, notes, nil

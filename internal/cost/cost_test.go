@@ -27,7 +27,7 @@ func TestEstimateAndApply(t *testing.T) {
 		t.Errorf("unexpected monthly cost %.2f-%.2f", w.MonthlyMin, w.MonthlyMax)
 	}
 
-	adv := []Advice{{Recommendation: ai.Recommendation{Resource: "Deployment/orders-api", Container: "api", CPURequest: "500m", MemoryRequest: "512Mi", MemoryLimit: "1Gi"}}}
+	adv := []Advice{{Recommendation: ai.Recommendation{Resource: "shop/Deployment/orders-api", Container: "api", CPURequest: "500m", MemoryRequest: "512Mi", MemoryLimit: "1Gi"}}}
 	if n := Apply(ws, adv); n != 1 {
 		t.Fatalf("expected 1 applied recommendation")
 	}

@@ -79,6 +79,15 @@ type Workload struct {
 	target *rules.Target
 }
 
+// Key identifies the workload uniquely: "namespace/Kind/name" (or
+// "Kind/name" without a namespace).
+func (w *Workload) Key() string {
+	if w.Namespace == "" {
+		return w.Resource
+	}
+	return w.Namespace + "/" + w.Resource
+}
+
 // Estimate computes costs for all workloads in objs. HorizontalPodAutoscalers
 // in the same set turn the replica count into a min..max range.
 func Estimate(objs []*manifest.Object, p Pricing) []*Workload {
@@ -169,7 +178,7 @@ type Advice struct {
 func RightSize(ctx context.Context, client *ai.Client, ws []*Workload, p Pricing) ([]Advice, error) {
 	var in []ai.WorkloadInput
 	for _, w := range ws {
-		wi := ai.WorkloadInput{Resource: w.Resource, Kind: w.Kind, Replicas: strconv.Itoa(w.MinReplicas)}
+		wi := ai.WorkloadInput{Resource: w.Key(), Kind: w.Kind, Replicas: strconv.Itoa(w.MinReplicas)}
 		if w.MinReplicas != w.MaxReplicas {
 			wi.Replicas = fmt.Sprintf("%d-%d (HPA)", w.MinReplicas, w.MaxReplicas)
 		}
@@ -244,7 +253,7 @@ func Apply(ws []*Workload, advice []Advice) int {
 
 func find(ws []*Workload, resource, container string) (*Workload, *Container) {
 	for _, w := range ws {
-		if w.Resource != resource {
+		if w.Key() != resource {
 			continue
 		}
 		for i := range w.Containers {

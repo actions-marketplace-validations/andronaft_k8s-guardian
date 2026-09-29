@@ -28,7 +28,7 @@ func (a *App) diff(args []string) (int, error) {
 	var f flags
 	fs := a.flagSet("diff", "diff -f <file|dir|chart> [-n ns] [--context ctx] [flags]")
 	f.input(fs)
-	f.output(fs, "text, json, sarif")
+	f.output(fs, "text, json, sarif, github, markdown")
 	f.ruleFlags(fs)
 	f.cluster(fs)
 	pos, err := parse(fs, args)
@@ -62,8 +62,11 @@ func (a *App) diff(args []string) (int, error) {
 		if err := enc.Encode(res); err != nil {
 			return ExitError, err
 		}
-	case "sarif":
-		if err := report.Write(a.Stdout, "sarif", findings, report.Summary{}, false); err != nil {
+	case "sarif", "github", "markdown":
+		if err := report.Write(a.Stdout, f.format, findings, report.Summarize(findings), false); err != nil {
+			return ExitError, err
+		}
+		if err := githubExtras(f.format, findings); err != nil {
 			return ExitError, err
 		}
 	case "text", "":

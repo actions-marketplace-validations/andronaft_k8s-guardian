@@ -22,6 +22,8 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Opens a PR updating the plugin in kubernetes-sigs/krew-index once the
-      # plugin has been accepted there for the first time.
+      # Opens a PR updating the plugin in kubernetes-sigs/krew-index. The very
+      # first submission of .krew.yaml has to be done by hand, so don't fail
+      # the release before that.
       - uses: rajatjindal/krew-release-bot@v0.0.46
+        continue-on-error: true

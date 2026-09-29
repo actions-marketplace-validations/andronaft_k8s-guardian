@@ -296,7 +296,7 @@ Shorthands (kubectl plugin style):
   %[1]s -f app.yaml                         same as "check -f app.yaml"
   %[1]s deployment/my-app -n prod           same as "audit deployment/my-app -n prod"
 
-Common flags: --format text|json|sarif  --fail-on error|warning|info  --skip KG006,KG015  --rules <path>
+Common flags: --format text|json|sarif|github|markdown  --fail-on error|warning|info  --skip KG006,KG015  --rules <path>
 Exit codes: 0 ok, 1 findings at/above --fail-on, 2 usage or runtime error.
 Environment: ANTHROPIC_API_KEY (for --ai), K8S_GUARDIAN_MODEL (default %[3]s),
              K8S_GUARDIAN_RULES, K8S_GUARDIAN_CPU_HOUR / K8S_GUARDIAN_GIB_HOUR (cost).
