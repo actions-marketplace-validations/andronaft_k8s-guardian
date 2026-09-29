@@ -292,39 +292,64 @@ func orZero(s string) string {
 	return s
 }
 
-// Headroom applied to observed usage when suggesting requests.
+// UsageSource provides observed usage per container of a workload.
+type UsageSource interface {
+	// Usage returns per-container usage and the number of pods it is based on.
+	Usage(w *Workload, namespace string) (map[string]cluster.Usage, int, error)
+	// Headroom returns the CPU and memory multipliers applied to the usage.
+	Headroom() (cpu, memory float64)
+	// Describe explains the measurement for a workload note.
+	Describe(pods int) string
+}
+
 const (
-	CPUHeadroom    = 2.0 // CPU is compressible; bursts are throttled, not killed
-	MemoryHeadroom = 1.5
-	minCPU         = 10       // millicores
-	minMemory      = 32 << 20 // bytes
+	minCPU    = 10       // millicores
+	minMemory = 32 << 20 // bytes
 )
 
-// AttachUsage reads live usage from metrics-server for every workload and
-// derives offline right-sizing suggestions. It returns notes about
-// workloads it could not measure.
-func AttachUsage(ws []*Workload, c cluster.Cluster, defaultNS string, p Pricing) []string {
+// MetricsServer reads a point-in-time snapshot with `kubectl top`.
+type MetricsServer struct{ Cluster cluster.Cluster }
+
+func (m MetricsServer) Usage(w *Workload, ns string) (map[string]cluster.Usage, int, error) {
+	sel := selector(w)
+	if len(sel) == 0 {
+		return nil, 0, fmt.Errorf("no selector/labels to find its pods")
+	}
+	u, n, err := m.Cluster.PodUsage(ns, sel)
+	if err != nil {
+		return nil, 0, fmt.Errorf("is metrics-server installed? %w", err)
+	}
+	return u, n, nil
+}
+
+// Snapshots can miss peaks: CPU gets 2x (it is throttled, not killed), memory 1.5x.
+func (MetricsServer) Headroom() (float64, float64) { return 2.0, 1.5 }
+
+func (MetricsServer) Describe(pods int) string {
+	return fmt.Sprintf("usage sampled from %d running pod(s) (point-in-time snapshot, check peak load before cutting requests)", pods)
+}
+
+// AttachUsage reads observed usage for every workload from src and derives
+// right-sizing suggestions. It returns notes about workloads it could not
+// measure.
+func AttachUsage(ws []*Workload, src UsageSource, defaultNS string, p Pricing) []string {
 	var notes []string
+	cpuHead, memHead := src.Headroom()
 	for _, w := range ws {
 		if w.Kind == "Job" || w.Kind == "CronJob" {
-			continue
-		}
-		sel := selector(w)
-		if len(sel) == 0 {
-			notes = append(notes, w.Resource+": no selector/labels to find its pods")
 			continue
 		}
 		ns := w.Namespace
 		if ns == "" {
 			ns = defaultNS
 		}
-		usage, pods, err := c.PodUsage(ns, sel)
+		usage, pods, err := src.Usage(w, ns)
 		if err != nil {
-			notes = append(notes, fmt.Sprintf("%s: could not read metrics (is metrics-server installed?): %v", w.Resource, err))
+			notes = append(notes, fmt.Sprintf("%s: could not read usage: %v", w.Resource, err))
 			continue
 		}
 		if pods == 0 {
-			notes = append(notes, w.Resource+": no running pods found, usage unknown")
+			notes = append(notes, w.Resource+": no pods found, usage unknown")
 			continue
 		}
 		for i := range w.Containers {
@@ -336,11 +361,11 @@ func AttachUsage(ws []*Workload, c cluster.Cluster, defaultNS string, p Pricing)
 			ct.UsedCPU, _ = quantity.MilliCPU(u.CPU)
 			ct.UsedMemory, _ = quantity.Bytes(u.Memory)
 			ct.HasUsage = true
-			ct.SuggestedCPU = roundUp(max(int64(float64(ct.UsedCPU)*CPUHeadroom), minCPU), 5)
-			ct.SuggestedMemory = roundUp(max(int64(float64(ct.UsedMemory)*MemoryHeadroom), minMemory), 16<<20)
+			ct.SuggestedCPU = roundUp(max(int64(float64(ct.UsedCPU)*cpuHead), minCPU), 5)
+			ct.SuggestedMemory = roundUp(max(int64(float64(ct.UsedMemory)*memHead), minMemory), 16<<20)
 			ct.UsageSavings = (p.Monthly(ct.MilliCPU, ct.Memory) - p.Monthly(ct.SuggestedCPU, ct.SuggestedMemory)) * float64(w.MinReplicas)
 		}
-		w.Notes = append(w.Notes, fmt.Sprintf("usage sampled from %d running pod(s) (point-in-time snapshot, check peak load before cutting requests)", pods))
+		w.Notes = append(w.Notes, src.Describe(pods))
 	}
 	return notes
 }

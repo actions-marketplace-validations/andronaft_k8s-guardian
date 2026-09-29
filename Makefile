@@ -4,7 +4,7 @@ VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 LDFLAGS := -s -w -X main.version=$(VERSION)
 PREFIX  ?= /usr/local
 
-.PHONY: build test e2e lint install uninstall clean
+.PHONY: build test e2e demo lint install uninstall clean
 
 build:
 	go build -ldflags "$(LDFLAGS)" -o bin/$(BINARY) ./cmd/k8s-guardian
@@ -17,6 +17,11 @@ test:
 #   export KUBEBUILDER_ASSETS=$$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path)
 e2e:
 	go test -tags e2e -count=1 -v ./test/e2e/
+
+demo: build
+	python3 hack/demo/record.py
+	agg --font-family "DejaVu Sans Mono,Noto Color Emoji" --font-size 14 --theme monokai \
+		--idle-time-limit 3 --last-frame-duration 4 docs/demo.cast docs/demo.gif
 
 lint:
 	go vet ./...

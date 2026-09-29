@@ -242,7 +242,7 @@ func TestCostUsage(t *testing.T) {
 			t.Errorf("missing %q in:\n%s", want, out)
 		}
 	}
-	if !strings.Contains(errOut, "Deployment/web: could not read metrics") {
+	if !strings.Contains(errOut, "Deployment/web: could not read usage: is metrics-server installed?") {
 		t.Errorf("expected a metrics note, got %q", errOut)
 	}
 }

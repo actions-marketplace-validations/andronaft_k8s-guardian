@@ -213,3 +213,9 @@ func sarifLevel(s rules.Severity) string {
 	}
 	return "note"
 }
+
+// Paint applies an ANSI color code when stdout is a terminal.
+func Paint(code, s string) string { return paint(code, s) }
+
+// SeverityLabel is the colored severity label used in text output.
+func SeverityLabel(sev rules.Severity) string { return icon(sev) }

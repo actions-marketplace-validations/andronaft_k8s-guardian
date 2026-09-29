@@ -12,13 +12,14 @@ import (
 )
 
 func (a *App) export(args []string) (int, error) {
-	if len(args) == 0 || args[0] != "vap" {
-		fmt.Fprintf(a.Stderr, "Usage: %s export vap [--builtin all|none|KG001,...] [--rules path] [--action Deny|Warn|Audit] [-o file]\n", a.Name)
-		return ExitError, errors.New("only the vap (ValidatingAdmissionPolicy) target is supported")
+	if len(args) == 0 || (args[0] != "vap" && args[0] != "kyverno") {
+		fmt.Fprintf(a.Stderr, "Usage: %s export vap|kyverno [--builtin all|none|KG001,...] [--rules path] [--action Deny|Warn|Audit] [-o file]\n", a.Name)
+		return ExitError, errors.New("export target must be vap (ValidatingAdmissionPolicy) or kyverno (Kyverno ClusterPolicy)")
 	}
+	target := args[0]
 	var f flags
 	var builtin, action, out, exclude string
-	fs := a.flagSet("export vap", "export vap [flags]")
+	fs := a.flagSet("export "+target, "export "+target+" [flags]")
 	fs.Var(&f.rulePaths, "rules", "custom rule file or directory (repeatable; "+custom.DefaultDir+" and $K8S_GUARDIAN_RULES are loaded automatically)")
 	fs.StringVar(&builtin, "builtin", "all", "built-in rules to export: all, none or a comma separated list ("+strings.Join(export.BuiltinIDs(), ",")+")")
 	fs.StringVar(&action, "action", "", "override the action for every policy: Deny, Warn or Audit (default: error→Deny, warning→Warn, info→Audit)")
@@ -58,7 +59,11 @@ func (a *App) export(args []string) (int, error) {
 			excl = append(excl, n)
 		}
 	}
-	res, err := export.VAP(ids, docs, export.Options{Action: action, ExcludeNamespaces: excl})
+	render := export.VAP
+	if target == "kyverno" {
+		render = export.Kyverno
+	}
+	res, err := render(ids, docs, export.Options{Action: action, ExcludeNamespaces: excl})
 	if err != nil {
 		return ExitError, err
 	}
@@ -70,6 +75,10 @@ func (a *App) export(args []string) (int, error) {
 	} else if err := os.WriteFile(out, res.YAML, 0o644); err != nil {
 		return ExitError, err
 	}
-	fmt.Fprintf(a.Stderr, "exported %d ValidatingAdmissionPolicy object(s) (+ bindings)\n", res.Count)
+	if target == "kyverno" {
+		fmt.Fprintf(a.Stderr, "exported %d Kyverno ClusterPolicy object(s)\n", res.Count)
+	} else {
+		fmt.Fprintf(a.Stderr, "exported %d ValidatingAdmissionPolicy object(s) (+ bindings)\n", res.Count)
+	}
 	return ExitOK, nil
 }

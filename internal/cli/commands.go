@@ -89,45 +89,35 @@ func (a *App) writeDiff(res *diff.Result) {
 	var all []rules.Finding
 	for _, o := range res.Objects {
 		counts[o.Status]++
-		sym, info := "~", fmt.Sprintf("%d change(s)", len(o.Changes))
+		sym, info := report.Paint("33", "~"), fmt.Sprintf("%d change(s)", len(o.Changes))
 		switch o.Status {
 		case diff.New:
-			sym, info = "+", "new (will be created)"
+			sym, info = report.Paint("32", "+"), "new (will be created)"
 		case diff.Unchanged:
-			sym, info = "=", "unchanged"
+			sym, info = report.Paint("2", "="), "unchanged"
 		case diff.Unknown:
-			sym, info = "?", "could not compare: "+o.Error
+			sym, info = report.Paint("31", "?"), "could not compare: "+o.Error
 		}
 		ns := ""
 		if o.Namespace != "" {
 			ns = " [" + o.Namespace + "]"
 		}
-		fmt.Fprintf(a.Stdout, "%s %s%s  %s\n", sym, o.Resource, ns, info)
+		fmt.Fprintf(a.Stdout, "%s %s%s  %s\n", sym, report.Paint("1", o.Resource), ns, info)
 		for i, c := range o.Changes {
 			if i == 15 {
 				fmt.Fprintf(a.Stdout, "    … and %d more\n", len(o.Changes)-15)
 				break
 			}
-			fmt.Fprintf(a.Stdout, "    %s: %s → %s\n", c.Path, c.Old, c.New)
+			fmt.Fprintf(a.Stdout, "    %s: %s → %s\n", c.Path, report.Paint("31", c.Old), report.Paint("32", c.New))
 		}
 		for _, fd := range o.Findings {
-			fmt.Fprintf(a.Stdout, "  %s %s  %s\n", sevLabel(fd.Severity), fd.RuleID, fd.Message)
+			fmt.Fprintf(a.Stdout, "  %s %s  %s\n", report.SeverityLabel(fd.Severity), report.Paint("2", fd.RuleID), fd.Message)
 		}
 		all = append(all, o.Findings...)
 	}
 	s := report.Summarize(all)
 	fmt.Fprintf(a.Stdout, "\n%d new, %d changed, %d unchanged — %d breaking/error, %d warning(s), %d info\n",
 		counts[diff.New], counts[diff.Changed], counts[diff.Unchanged], s.Errors, s.Warnings, s.Infos)
-}
-
-func sevLabel(s rules.Severity) string {
-	switch s {
-	case rules.Error:
-		return "✖ error  "
-	case rules.Warning:
-		return "⚠ warning"
-	}
-	return "ℹ info   "
 }
 
 // ---- cost ------------------------------------------------------------------
@@ -137,7 +127,10 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 	var apply bool
 	p := cost.DefaultPricing()
 	var usage bool
-	fs := a.flagSet("cost", "cost -f <file|dir|chart|-> [--usage [-n ns]] [--ai [--apply]] [--cpu-hour 0.0316] [--gib-hour 0.0042] [flags]")
+	var promURL, window string
+	fs := a.flagSet("cost", "cost -f <file|dir|chart|-> [--usage | --prometheus URL] [-n ns] [--ai [--apply]] [--cpu-hour 0.0316] [--gib-hour 0.0042] [flags]")
+	fs.StringVar(&promURL, "prometheus", os.Getenv("K8S_GUARDIAN_PROMETHEUS_URL"), "Prometheus URL: use p95 CPU / peak memory history instead of a snapshot (env K8S_GUARDIAN_PROMETHEUS_URL, token K8S_GUARDIAN_PROMETHEUS_TOKEN)")
+	fs.StringVar(&window, "window", "7d", "history window for --prometheus (e.g. 24h, 7d, 2w)")
 	f.input(fs)
 	f.cluster(fs)
 	fs.BoolVar(&usage, "usage", false, "compare requests with real usage from the cluster (kubectl top, needs metrics-server) and suggest right-sized values")
@@ -163,16 +156,32 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 		return ExitError, err
 	}
 	ws := cost.Estimate(objects(files), p)
-	if usage && len(ws) > 0 {
-		cl, err := cluster.NewKubectl(f.kubeContext)
-		if err != nil {
-			return ExitError, err
-		}
+	if usage && promURL != "" {
+		return ExitError, errors.New("use either --usage (metrics-server snapshot) or --prometheus (history)")
+	}
+	if (usage || promURL != "") && len(ws) > 0 {
+		var src cost.UsageSource
 		ns := f.namespace
-		if ns == "" {
-			ns = cl.DefaultNamespace()
+		if promURL != "" {
+			prom, err := cost.NewPrometheus(promURL, window)
+			if err != nil {
+				return ExitError, err
+			}
+			src = prom
+			if ns == "" {
+				ns = "default"
+			}
+		} else {
+			cl, err := cluster.NewKubectl(f.kubeContext)
+			if err != nil {
+				return ExitError, err
+			}
+			src = cost.MetricsServer{Cluster: cl}
+			if ns == "" {
+				ns = cl.DefaultNamespace()
+			}
 		}
-		for _, n := range cost.AttachUsage(ws, cl, ns, p) {
+		for _, n := range cost.AttachUsage(ws, src, ns, p) {
 			fmt.Fprintf(a.Stderr, "note: %s\n", n)
 		}
 	}

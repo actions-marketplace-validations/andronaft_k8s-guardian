@@ -47,6 +47,16 @@ jobs:
         env:
           GOTOOLCHAIN: auto
         run: echo "KUBEBUILDER_ASSETS=$(go run sigs.k8s.io/controller-runtime/tools/setup-envtest@latest use -p path)" >> "$GITHUB_ENV"
+      - name: Install Kyverno CLI and Prometheus
+        env:
+          KYVERNO_VERSION: v1.19.1
+          PROMETHEUS_VERSION: 3.15.0
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL "https://github.com/kyverno/kyverno/releases/download/${KYVERNO_VERSION}/kyverno-cli_${KYVERNO_VERSION}_linux_x86_64.tar.gz" | tar xz -C "$RUNNER_TEMP/bin" kyverno
+          curl -sSfL "https://github.com/prometheus/prometheus/releases/download/v${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION}.linux-amd64.tar.gz" \
+            | tar xz -C "$RUNNER_TEMP/bin" --strip-components=1 "prometheus-${PROMETHEUS_VERSION}.linux-amd64/prometheus" "prometheus-${PROMETHEUS_VERSION}.linux-amd64/promtool"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
       - name: e2e tests
         run: go test -tags e2e -count=1 -v ./test/e2e/
 

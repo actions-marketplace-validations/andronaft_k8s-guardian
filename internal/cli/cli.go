@@ -303,13 +303,15 @@ Fix:
 Before you deploy:
   %[1]s diff -f app.yaml -n prod            Compare with the cluster and flag breaking changes
                                             (immutable selectors, removed APIs, downtime, port changes)
-  %[1]s cost -f app.yaml [--usage] [--ai]   Estimate $/month; compare with real usage (metrics-server);
+  %[1]s cost -f app.yaml [--usage|--prometheus URL] [--ai]
+                                            Estimate $/month; compare with real usage (snapshot or 7d history);
                                             Claude right-sizes requests and shows savings
 
 Policies & integrations:
   %[1]s rule create "<policy in plain English>"   Generate a custom rule with Claude
   %[1]s export vap > policies.yaml          Enforce built-in + custom rules in the cluster itself
                                             (ValidatingAdmissionPolicy / CEL, no Kyverno or OPA needed)
+  %[1]s export kyverno > policies.yaml      ...or as Kyverno ClusterPolicies (CEL)
   %[1]s rules                               List built-in, custom, live and diff rules
   %[1]s mcp                                 Run as an MCP server (stdio) for Claude Code / Cursor
 

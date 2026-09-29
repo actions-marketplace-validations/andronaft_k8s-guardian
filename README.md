@@ -8,6 +8,8 @@
 [![Docker](https://img.shields.io/badge/ghcr.io-k8s--guardian-blue?logo=docker)](https://github.com/andronaft/k8s-guardian/pkgs/container/k8s-guardian)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
+![k8s-guardian demo](docs/demo.gif)
+
 Most Kubernetes linters are static: they read a YAML file and print an error. `k8s-guardian` also answers the questions you hit **at deploy time**:
 
 * *"The YAML is valid, but will it actually run in `prod`?"* Quotas, node sizes, LimitRanges, missing Secrets, CRDs.
@@ -26,9 +28,9 @@ Most Kubernetes linters are static: they read a YAML file and print an error. `k
 | 🖥️ | **Interactive review TUI**: finding on the left, colored diff on the right, `[y]` accept `[n]` skip `[e]` edit | `interactive -f` |
 | 🌐 | **Live cluster context**: ResourceQuota headroom, node capacity with nodeSelector, LimitRanges, missing ConfigMaps/Secrets/SAs/PVCs, CRDs, StorageClasses | `check --live` |
 | 🔀 | **Breaking-change detector**: compares with what is deployed, flags immutable fields, selector drift, removed APIs for *your* cluster version, Recreate downtime, HPA conflicts | `diff -f` |
-| 💰 | **Cost estimation + right-sizing**: $/month per workload (HPA-aware), real usage from metrics-server, Claude recommendations with savings | `cost -f [--usage] [--ai]` |
+| 💰 | **Cost estimation + right-sizing**: $/month per workload (HPA-aware), real usage from metrics-server or 7-day p95/peak history from Prometheus, Claude recommendations with savings | `cost -f [--usage\|--prometheus URL] [--ai]` |
 | 📜 | **Policies from plain language**: *"forbid :latest and require a contact email"* becomes a validated rule | `rule create "…"` |
-| 🚦 | **Enforce in the cluster**: built-in and custom rules exported as native ValidatingAdmissionPolicies (CEL), with no Kyverno or OPA needed and the same decisions as the CLI | `export vap` |
+| 🚦 | **Enforce in the cluster**: built-in and custom rules exported as native ValidatingAdmissionPolicies or Kyverno ClusterPolicies, with the same decisions as the CLI (tested against a real API server and the Kyverno CLI) | `export vap\|kyverno` |
 | 🔌 | **kubectl plugin** | `kubectl guard …` |
 | 🧠 | **MCP server** for Claude Code / Cursor: validate, fix, live-check, diff, cost, custom rules | `mcp` |
 | ⚡ | **GitHub Action & CI**: inline PR annotations, job summary, SARIF, exit codes, pre-commit hooks | `uses: andronaft/k8s-guardian@v0.3.0` |
@@ -157,6 +159,7 @@ The diff compares only the fields you declare, so server defaults don't show up 
 ```bash
 k8s-guardian cost -f k8s/                       # offline estimate
 k8s-guardian cost -f k8s/ --usage -n prod       # + real usage from metrics-server (kubectl top)
+k8s-guardian cost -f k8s/ --prometheus http://prometheus:9090 -n prod   # p95 CPU / peak memory over 7d
 k8s-guardian cost -f k8s/ --ai                  # + Claude right-sizing with savings
 k8s-guardian cost -f k8s/ --ai --apply          # write the recommendations into the files
 ```
@@ -179,7 +182,7 @@ With `--usage`, the requests are compared with what the pods actually consume ri
 POTENTIAL SAVINGS                                                      ~$463.01/month (99%) based on observed usage
 ```
 
-Usage is a point-in-time snapshot, so check your peak load before cutting requests. With `--usage --ai`, Claude also gets the observed usage, which makes its recommendations much more accurate.
+`--usage` is a point-in-time snapshot, so check your peak load before cutting requests. `--prometheus` avoids that: it uses the **p95 of CPU and the peak memory working set over `--window` (default 7d)** from cAdvisor metrics, with smaller headroom (1.25× CPU, 1.2× memory). Pods are matched to workloads by name. Generated suffixes such as Deployment hashes use Kubernetes' vowel-free alphabet, so `orders-api-worker-…` is never counted as `orders-api`. Set `K8S_GUARDIAN_PROMETHEUS_TOKEN` for authenticated endpoints. With `--usage --ai`, Claude also gets the observed usage, which makes its recommendations much more accurate.
 
 (The advice block above is an example of the output format.) Prices default to $0.0316 per vCPU-hour and $0.0042 per GiB-hour, which approximate on-demand general-purpose nodes. Set your own with `--cpu-hour`/`--gib-hour` or `K8S_GUARDIAN_CPU_HOUR`/`K8S_GUARDIAN_GIB_HOUR`. Only image names, ports, env var **names**, commands and resources are sent to Claude, never env values or Secrets.
 
@@ -212,6 +215,8 @@ See [`examples/rules/`](examples/rules) for more.
 k8s-guardian export vap > guardrails.yaml          # built-in + .k8s-guardian/rules
 k8s-guardian export vap --builtin KG001,KG010 --rules policies/ --action Warn
 kubectl apply -f guardrails.yaml
+
+k8s-guardian export kyverno > kyverno-policies.yaml   # if you already run Kyverno (>= 1.11, CEL)
 ```
 
 This generates native **ValidatingAdmissionPolicies** (Kubernetes ≥ 1.30, CEL). The API server then enforces your guardrails, so no Kyverno, OPA or webhook needs to run. Severities map to actions: `error` becomes Deny, `warning` becomes Warn, `info` becomes Audit. `kube-system` is excluded by default.
@@ -223,6 +228,8 @@ ORG001 require-contact-email: add metadata.annotations['example.com/contact'] wi
 ```
 
 CI and the cluster make **the same decision**. An e2e suite starts a real kube-apiserver, applies the exported policies and compares each admission decision with the CLI engine, across Pods, Deployments and CronJobs and every custom-rule operator (see [`test/e2e`](test/e2e)).
+
+For Kyverno, `error` becomes Enforce and everything else becomes Audit (policy reports). An e2e test runs the exported ClusterPolicies with the real Kyverno CLI and checks that it reports **exactly** the same rule set as the CLI engine.
 
 Exportable built-ins: KG001–KG007, KG010–KG012. Rules that need cross-resource or cluster context (probes on Services, quotas, …) stay in `check`.
 
@@ -382,7 +389,7 @@ internal/custom      declarative custom-rule DSL (paths, when/assert, ops)
 internal/live        cluster-aware checks (quota, nodes, LimitRange, references)
 internal/diff        structural diff + breaking-change analysis
 internal/cost        cost model, HPA-aware estimates, right-sizing
-internal/export      rules → ValidatingAdmissionPolicy (CEL)
+internal/export      rules → ValidatingAdmissionPolicy / Kyverno ClusterPolicy (CEL)
 internal/ai          Claude: fixes, rule generation, right-sizing (structured outputs)
 internal/tui         Bubble Tea review UI
 internal/cluster     read-only kubectl adapter (cached) + fake for tests
@@ -396,7 +403,8 @@ internal/mcp         MCP stdio server
 - [x] v0.3: live cluster context, interactive TUI, breaking-change diff, cost estimation, natural-language rules, GitHub Action
 - [x] v0.4: Kustomize (`-k`), real-usage right-sizing (`cost --usage`), Krew manifest
 - [x] v0.5: `export vap` (ValidatingAdmissionPolicy/CEL) + e2e against a real API server
-- [ ] Usage history from Prometheus (peaks, not a snapshot)
+- [x] v0.6: `export kyverno`, Prometheus usage history (`cost --prometheus`), demo GIF
+- [ ] Recommend HPA targets from Prometheus history
 - [ ] Admission webhook mode
 
 ## 🛠️ Development
@@ -405,7 +413,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.
 
 ```bash
 make test    # unit tests (fake cluster + mocked Claude API, no credentials needed)
-make e2e     # real kube-apiserver + etcd via envtest (see Makefile)
+make e2e     # real kube-apiserver + etcd (envtest), Kyverno CLI and Prometheus (see Makefile)
+make demo    # re-record docs/demo.gif (needs agg)
 make lint    # go vet + gofmt
 make build   # bin/k8s-guardian + bin/kubectl-guard
 ```

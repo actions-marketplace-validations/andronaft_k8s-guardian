@@ -38,3 +38,12 @@ func TestEstimateAndApply(t *testing.T) {
 		}
 	}
 }
+
+func estimate(t *testing.T, doc string) []*Workload {
+	t.Helper()
+	f, err := manifest.Parse([]byte(doc), "w.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return Estimate(f.Objects, Pricing{CPUHour: 0.03, GiBHour: 0.004})
+}
