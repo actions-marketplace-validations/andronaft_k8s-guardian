@@ -268,7 +268,7 @@ jobs:
   guardrails:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: andronaft/k8s-guardian@main   # pin to a release tag once published
         with:
           path: k8s/ charts/my-app     # files, directories or Helm charts
@@ -299,12 +299,12 @@ permissions:
   contents: read
   security-events: write
 steps:
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@v7
   - uses: andronaft/k8s-guardian@main
     with:
       path: k8s/
       sarif-file: k8s-guardian.sarif
-  - uses: github/codeql-action/upload-sarif@v3
+  - uses: github/codeql-action/upload-sarif@v4
     if: always()
     with:
       sarif_file: k8s-guardian.sarif
