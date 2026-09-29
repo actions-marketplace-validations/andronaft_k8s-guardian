@@ -27,7 +27,7 @@ Most Kubernetes linters are static: they read a YAML file and print an error. `k
 | 📜 | **Policies from plain language**: *"forbid :latest and require a contact email"* becomes a validated rule | `rule create "…"` |
 | 🔌 | **kubectl plugin** | `kubectl guard …` |
 | 🧠 | **MCP server** for Claude Code / Cursor: validate, fix, live-check, diff, cost, custom rules | `mcp` |
-| ⚡ | **GitHub Action & CI**: inline PR annotations, job summary, SARIF, exit codes, pre-commit hooks | `uses: andronaft/k8s-guardian@…` |
+| ⚡ | **GitHub Action & CI**: inline PR annotations, job summary, SARIF, exit codes, pre-commit hooks | `uses: andronaft/k8s-guardian@v0.3.0` |
 
 ---
 
@@ -272,7 +272,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: andronaft/k8s-guardian@main   # pin to a release tag once published
+      - uses: andronaft/k8s-guardian@v0.3.0
         with:
           path: k8s/ charts/my-app     # files, directories or Helm charts
           fail-on: error               # error | warning | info
@@ -303,7 +303,7 @@ permissions:
   security-events: write
 steps:
   - uses: actions/checkout@v7
-  - uses: andronaft/k8s-guardian@main
+  - uses: andronaft/k8s-guardian@v0.3.0
     with:
       path: k8s/
       sarif-file: k8s-guardian.sarif
@@ -316,7 +316,7 @@ steps:
 With cluster credentials in the job, you can block breaking changes before deploying:
 
 ```yaml
-  - uses: andronaft/k8s-guardian@main          # also puts k8s-guardian on PATH
+  - uses: andronaft/k8s-guardian@v0.3.0        # also puts k8s-guardian on PATH
     with: {path: k8s/, live: "true", namespace: prod}
   - run: k8s-guardian diff -f k8s/ -n prod --format github
 ```
@@ -328,7 +328,7 @@ Outside GitHub, use `--format github|markdown|sarif|json` in any CI. There is al
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/andronaft/k8s-guardian
-    rev: main          # pin to a release tag once published
+    rev: v0.3.0
     hooks:
       - id: k8s-guardian        # or k8s-guardian-fix
         files: ^k8s/.*\.ya?ml$
