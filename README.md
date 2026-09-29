@@ -41,6 +41,9 @@ go install github.com/andronaft/k8s-guardian/cmd/k8s-guardian@latest
 git clone https://github.com/andronaft/k8s-guardian && cd k8s-guardian
 make build && sudo make install
 
+# Docker (multi-arch, published to GHCR on every release)
+docker run --rm -v "$PWD:/work" ghcr.io/andronaft/k8s-guardian check -f .
+
 # Krew (once published to krew-index)
 kubectl krew install guard
 ```
