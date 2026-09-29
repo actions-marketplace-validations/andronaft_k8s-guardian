@@ -40,7 +40,7 @@ Most Kubernetes linters are static: they read a YAML file and print an error. `k
 ## 📦 Installation
 
 ```bash
-# Go
+# Go (>= 1.26)
 go install github.com/andronaft/k8s-guardian/cmd/k8s-guardian@latest
 
 # From source (also creates the kubectl-guard plugin symlink)
