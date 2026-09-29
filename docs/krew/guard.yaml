@@ -1,5 +1,5 @@
 # Krew plugin manifest for kubernetes-sigs/krew-index (plugins/guard.yaml).
-# Generated from the v0.3.0 release; future releases are updated by
+# Generated from the v0.4.0 release; future releases are updated by
 # krew-release-bot from .krew.yaml. Submit this file once by hand:
 #   https://krew.sigs.k8s.io/docs/developer-guide/release/new-plugin/
 apiVersion: krew.googlecontainertools.github.com/v1alpha2
@@ -7,7 +7,7 @@ kind: Plugin
 metadata:
   name: guard
 spec:
-  version: v0.3.0
+  version: v0.4.0
   homepage: https://github.com/andronaft/k8s-guardian
   shortDescription: Validate and auto-fix workloads against security guardrails
   description: |
@@ -28,41 +28,41 @@ spec:
         matchLabels:
           os: linux
           arch: amd64
-      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.3.0/kubectl-guard_v0.3.0_linux_amd64.tar.gz
-      sha256: 2f96b9c5c155f5fd4a55c30f8a15aa68081c9b390ceabb57114b193fcb09fda1
+      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.4.0/kubectl-guard_v0.4.0_linux_amd64.tar.gz
+      sha256: a589ed4858a310e3df7bef4ee9f5b4024563e38765621c918d44a5aff28bf96d
       bin: kubectl-guard
     - selector:
         matchLabels:
           os: linux
           arch: arm64
-      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.3.0/kubectl-guard_v0.3.0_linux_arm64.tar.gz
-      sha256: a9a3df9e598f05fb9d15288d79fd9561fbd09ac83b532aa8aa3cd93793b37f04
+      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.4.0/kubectl-guard_v0.4.0_linux_arm64.tar.gz
+      sha256: 60967a000dee0712884bc7f4250ea3ed48625417f2dc205f440d88d6ae15540c
       bin: kubectl-guard
     - selector:
         matchLabels:
           os: darwin
           arch: amd64
-      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.3.0/kubectl-guard_v0.3.0_darwin_amd64.tar.gz
-      sha256: 4b3137e77c71ef8d00be3910fcb05424de0684e17df3bff00b9f5acd5528b824
+      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.4.0/kubectl-guard_v0.4.0_darwin_amd64.tar.gz
+      sha256: aeed632b3ca0f58794a0777d1943feb49392b67fc79f0cfad63580c2f425e6b2
       bin: kubectl-guard
     - selector:
         matchLabels:
           os: darwin
           arch: arm64
-      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.3.0/kubectl-guard_v0.3.0_darwin_arm64.tar.gz
-      sha256: c7ce9df4eca3afcfb45c21dba8340e3a25fef047b8bbbcccde1309cb17640200
+      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.4.0/kubectl-guard_v0.4.0_darwin_arm64.tar.gz
+      sha256: 7399fcd5896e22e30cd935800df9e9f80f4bae47db85f62a9720529cb120ef2d
       bin: kubectl-guard
     - selector:
         matchLabels:
           os: windows
           arch: amd64
-      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.3.0/kubectl-guard_v0.3.0_windows_amd64.zip
-      sha256: 6e72f08558c206ff4393b5ecb71db3664f5352dee4daebd8e699cf6e84c34d18
+      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.4.0/kubectl-guard_v0.4.0_windows_amd64.zip
+      sha256: ce26228f0fa5a4404bbe4bda6f6338555646f017e9442714fa275deb67503b5f
       bin: kubectl-guard.exe
     - selector:
         matchLabels:
           os: windows
           arch: arm64
-      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.3.0/kubectl-guard_v0.3.0_windows_arm64.zip
-      sha256: f77aa214372cbd3c1118ceeba822c0dc53fd65bfa06d00ec7ac1c2c4605c3da5
+      uri: https://github.com/andronaft/k8s-guardian/releases/download/v0.4.0/kubectl-guard_v0.4.0_windows_arm64.zip
+      sha256: 2091a7afff804e67320bbc9b5e705aaee4de75bf8433ddc26f8840f41b2f3c13
       bin: kubectl-guard.exe
