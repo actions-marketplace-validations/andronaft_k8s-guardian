@@ -66,6 +66,11 @@ spec:
 		{Condition{Path: "spec.containers[0].resources.limits.memory", Op: "gt", Value: "2Gi"}, false},
 		{Condition{Path: "spec.containers[1].resources.limits.cpu", Op: "lte", Value: "2"}, true}, // missing -> ok
 		{Condition{Path: "kind", Op: "equals", Value: "Pod"}, true},
+		// [*] means every element: one container without limits fails "exists"
+		{Condition{Path: "spec.containers[*].resources.limits", Op: "exists"}, false},
+		{Condition{Path: "spec.containers[*].name", Op: "exists"}, true},
+		{Condition{Path: "spec.volumes[*].name", Op: "exists"}, false}, // no volumes at all
+		{Condition{Path: "spec.volumes[*].hostPath", Op: "notExists"}, true},
 	}
 	for _, tc := range cases {
 		cc, err := compileCond(tc.c)

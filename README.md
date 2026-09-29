@@ -28,6 +28,7 @@ Most Kubernetes linters are static: they read a YAML file and print an error. `k
 | 🔀 | **Breaking-change detector**: compares with what is deployed, flags immutable fields, selector drift, removed APIs for *your* cluster version, Recreate downtime, HPA conflicts | `diff -f` |
 | 💰 | **Cost estimation + right-sizing**: $/month per workload (HPA-aware), real usage from metrics-server, Claude recommendations with savings | `cost -f [--usage] [--ai]` |
 | 📜 | **Policies from plain language**: *"forbid :latest and require a contact email"* becomes a validated rule | `rule create "…"` |
+| 🚦 | **Enforce in the cluster**: built-in and custom rules exported as native ValidatingAdmissionPolicies (CEL), with no Kyverno or OPA needed and the same decisions as the CLI | `export vap` |
 | 🔌 | **kubectl plugin** | `kubectl guard …` |
 | 🧠 | **MCP server** for Claude Code / Cursor: validate, fix, live-check, diff, cost, custom rules | `mcp` |
 | ⚡ | **GitHub Action & CI**: inline PR annotations, job summary, SARIF, exit codes, pre-commit hooks | `uses: andronaft/k8s-guardian@v0.3.0` |
@@ -205,6 +206,26 @@ spec:
 
 See [`examples/rules/`](examples/rules) for more.
 
+### 7. Enforce the same rules in the cluster: `export vap`
+
+```bash
+k8s-guardian export vap > guardrails.yaml          # built-in + .k8s-guardian/rules
+k8s-guardian export vap --builtin KG001,KG010 --rules policies/ --action Warn
+kubectl apply -f guardrails.yaml
+```
+
+This generates native **ValidatingAdmissionPolicies** (Kubernetes ≥ 1.30, CEL). The API server then enforces your guardrails, so no Kyverno, OPA or webhook needs to run. Severities map to actions: `error` becomes Deny, `warning` becomes Warn, `info` becomes Audit. `kube-system` is excluded by default.
+
+```text
+$ kubectl apply -f deploy.yaml
+The deployments "api" is invalid: ValidatingAdmissionPolicy 'k8s-guardian-org001-require-contact-email' denied request:
+ORG001 require-contact-email: add metadata.annotations['example.com/contact'] with a valid email
+```
+
+CI and the cluster make **the same decision**. An e2e suite starts a real kube-apiserver, applies the exported policies and compares each admission decision with the CLI engine, across Pods, Deployments and CronJobs and every custom-rule operator (see [`test/e2e`](test/e2e)).
+
+Exportable built-ins: KG001–KG007, KG010–KG012. Rules that need cross-resource or cluster context (probes on Services, quotas, …) stay in `check`.
+
 ---
 
 ## 📏 Built-in rules
@@ -259,6 +280,7 @@ claude mcp add k8s-guardian -- k8s-guardian mcp
 | `diff_cluster` | Breaking changes compared with what is deployed |
 | `estimate_cost` | Monthly cost of the workloads |
 | `validate_custom_rule` | Validate and test an organisation rule; the agent can author policies without an API key |
+| `export_admission_policies` | Built-in + custom rules as ValidatingAdmissionPolicies (CEL) for the cluster |
 | `audit_cluster_resource` | Validate a live resource |
 | `list_rules` | All rules |
 
@@ -360,6 +382,7 @@ internal/custom      declarative custom-rule DSL (paths, when/assert, ops)
 internal/live        cluster-aware checks (quota, nodes, LimitRange, references)
 internal/diff        structural diff + breaking-change analysis
 internal/cost        cost model, HPA-aware estimates, right-sizing
+internal/export      rules → ValidatingAdmissionPolicy (CEL)
 internal/ai          Claude: fixes, rule generation, right-sizing (structured outputs)
 internal/tui         Bubble Tea review UI
 internal/cluster     read-only kubectl adapter (cached) + fake for tests
@@ -372,8 +395,8 @@ internal/mcp         MCP stdio server
 - [x] v0.2: MCP server
 - [x] v0.3: live cluster context, interactive TUI, breaking-change diff, cost estimation, natural-language rules, GitHub Action
 - [x] v0.4: Kustomize (`-k`), real-usage right-sizing (`cost --usage`), Krew manifest
+- [x] v0.5: `export vap` (ValidatingAdmissionPolicy/CEL) + e2e against a real API server
 - [ ] Usage history from Prometheus (peaks, not a snapshot)
-- [ ] Export custom rules to Kyverno / ValidatingAdmissionPolicy (CEL)
 - [ ] Admission webhook mode
 
 ## 🛠️ Development
@@ -382,6 +405,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.
 
 ```bash
 make test    # unit tests (fake cluster + mocked Claude API, no credentials needed)
+make e2e     # real kube-apiserver + etcd via envtest (see Makefile)
 make lint    # go vet + gofmt
 make build   # bin/k8s-guardian + bin/kubectl-guard
 ```

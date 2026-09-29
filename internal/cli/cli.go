@@ -76,6 +76,8 @@ func (a *App) Run(args []string) int {
 		code, err = a.interactive(args[1:])
 	case "rule":
 		code, err = a.rule(ctx, args[1:])
+	case "export":
+		code, err = a.export(args[1:])
 	case "rules":
 		err = a.listRules(args[1:])
 	case "mcp", "serve":
@@ -306,6 +308,8 @@ Before you deploy:
 
 Policies & integrations:
   %[1]s rule create "<policy in plain English>"   Generate a custom rule with Claude
+  %[1]s export vap > policies.yaml          Enforce built-in + custom rules in the cluster itself
+                                            (ValidatingAdmissionPolicy / CEL, no Kyverno or OPA needed)
   %[1]s rules                               List built-in, custom, live and diff rules
   %[1]s mcp                                 Run as an MCP server (stdio) for Claude Code / Cursor
 

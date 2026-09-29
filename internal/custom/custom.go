@@ -124,29 +124,6 @@ func parsePath(p string) ([]segment, error) {
 	return segs, nil
 }
 
-func resolve(n *yaml.Node, segs []segment) []*yaml.Node {
-	cur := []*yaml.Node{n}
-	for _, s := range segs {
-		var next []*yaml.Node
-		for _, c := range cur {
-			switch {
-			case s.all:
-				next = append(next, yamlx.Items(c)...)
-			case s.index >= 0:
-				if items := yamlx.Items(c); s.index < len(items) {
-					next = append(next, items[s.index])
-				}
-			default:
-				if v := yamlx.Get(c, s.key); v != nil && v.Tag != "!!null" {
-					next = append(next, v)
-				}
-			}
-		}
-		cur = next
-	}
-	return cur
-}
-
 func compileCond(c Condition) (*compiledCond, error) {
 	cc := &compiledCond{Condition: c}
 	var err error
@@ -186,48 +163,86 @@ func scalar(n *yaml.Node) string {
 // regex matches on a missing path are considered satisfied except for
 // "matches", "equals" and "in"; combine with "exists" to require a field.
 func (c *compiledCond) holds(n *yaml.Node) bool {
-	nodes := resolve(n, c.path)
-	switch c.Op {
-	case "exists":
-		return len(nodes) > 0
-	case "notExists":
-		return len(nodes) == 0
-	case "matches", "equals", "in":
-		if len(nodes) == 0 {
-			return false
+	return c.holdsAt(n, c.path)
+}
+
+// holdsAt walks the path from n. A [*] segment requires every element to
+// satisfy the rest of the condition. These semantics are mirrored exactly by
+// the CEL generated in internal/export, and the e2e tests compare both
+// against a real API server.
+func (c *compiledCond) holdsAt(n *yaml.Node, segs []segment) bool {
+	cur := n
+	for i, s := range segs {
+		if cur == nil {
+			break
 		}
-	}
-	for _, v := range nodes {
-		s := scalar(v)
-		ok := true
-		switch c.Op {
-		case "equals":
-			ok = s == c.Value
-		case "notEquals":
-			ok = s != c.Value
-		case "in", "notIn":
-			found := false
-			for _, want := range c.Values {
-				if s == want {
-					found = true
+		if s.all {
+			items := yamlx.Items(cur)
+			present := cur.Kind == yaml.SequenceNode && len(items) > 0
+			all := true
+			for _, it := range items {
+				if !c.holdsAt(it, segs[i+1:]) {
+					all = false
+					break
 				}
 			}
-			ok = found == (c.Op == "in")
-		case "matches":
-			ok = c.re.MatchString(s)
-		case "notMatches":
-			ok = !c.re.MatchString(s)
-		case "gt", "gte", "lt", "lte":
-			x, err := quantity.Parse(s)
-			if err != nil {
-				ok = false
-				break
+			switch c.Op {
+			case "exists", "matches", "equals", "in":
+				return present && all
+			default:
+				return !present || all
 			}
-			ok = map[string]bool{"gt": x > c.num, "gte": x >= c.num, "lt": x < c.num, "lte": x <= c.num}[c.Op]
 		}
-		if !ok {
+		switch {
+		case s.index >= 0 && s.key == "":
+			items := yamlx.Items(cur)
+			cur = nil
+			if s.index < len(items) {
+				cur = items[s.index]
+			}
+		default:
+			cur = yamlx.Get(cur, s.key)
+			if cur != nil && cur.Tag == "!!null" {
+				cur = nil
+			}
+		}
+	}
+	present := cur != nil
+	switch c.Op {
+	case "exists":
+		return present
+	case "notExists":
+		return !present
+	}
+	if !present {
+		// Comparisons on a missing field pass, except for the positive
+		// matchers; combine with "exists" to require the field.
+		return c.Op != "matches" && c.Op != "equals" && c.Op != "in"
+	}
+	s := scalar(cur)
+	switch c.Op {
+	case "equals":
+		return s == c.Value
+	case "notEquals":
+		return s != c.Value
+	case "in", "notIn":
+		found := false
+		for _, want := range c.Values {
+			if s == want {
+				found = true
+			}
+		}
+		return found == (c.Op == "in")
+	case "matches":
+		return c.re.MatchString(s)
+	case "notMatches":
+		return !c.re.MatchString(s)
+	case "gt", "gte", "lt", "lte":
+		x, err := quantity.Parse(s)
+		if err != nil {
 			return false
 		}
+		return map[string]bool{"gt": x > c.num, "gte": x >= c.num, "lt": x < c.num, "lte": x <= c.num}[c.Op]
 	}
 	return true
 }
@@ -361,15 +376,37 @@ func Parse(data []byte, source string) ([]Document, error) {
 // Load reads rule files from the given paths (files or directories). A
 // missing DefaultDir is silently ignored.
 func Load(paths []string) ([]*rules.Rule, error) {
+	docs, sources, err := LoadDocuments(paths)
+	if err != nil {
+		return nil, err
+	}
 	var out []*rules.Rule
 	seen := map[string]string{}
+	for i, d := range docs {
+		r, err := Compile(d)
+		if err != nil {
+			return nil, fmt.Errorf("%s: %w", sources[i], err)
+		}
+		if prev, dup := seen[r.ID]; dup {
+			return nil, fmt.Errorf("%s: duplicate rule id %s (also in %s)", sources[i], r.ID, prev)
+		}
+		seen[r.ID] = sources[i]
+		out = append(out, r)
+	}
+	return out, nil
+}
+
+// LoadDocuments reads rule documents and the file each came from.
+func LoadDocuments(paths []string) ([]Document, []string, error) {
+	var docs []Document
+	var sources []string
 	for _, p := range paths {
 		info, err := os.Stat(p)
 		if err != nil {
 			if p == DefaultDir && os.IsNotExist(err) {
 				continue
 			}
-			return nil, err
+			return nil, nil, err
 		}
 		files := []string{p}
 		if info.IsDir() {
@@ -378,26 +415,19 @@ func Load(paths []string) ([]*rules.Rule, error) {
 		for _, f := range files {
 			data, err := os.ReadFile(f)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			docs, err := Parse(data, f)
+			ds, err := Parse(data, f)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
-			for _, d := range docs {
-				r, err := Compile(d)
-				if err != nil {
-					return nil, fmt.Errorf("%s: %w", f, err)
-				}
-				if prev, dup := seen[r.ID]; dup {
-					return nil, fmt.Errorf("%s: duplicate rule id %s (also in %s)", f, r.ID, prev)
-				}
-				seen[r.ID] = f
-				out = append(out, r)
+			for _, d := range ds {
+				docs = append(docs, d)
+				sources = append(sources, f)
 			}
 		}
 	}
-	return out, nil
+	return docs, sources, nil
 }
 
 // Marshal renders a document as YAML.
@@ -410,4 +440,25 @@ func Marshal(d Document) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), enc.Close()
+}
+
+// Segment is one element of a parsed rule path (exported for policy export).
+type Segment struct {
+	Key   string // map key / field name ("" for index and wildcard)
+	Index int    // >= 0 for [N]
+	All   bool   // [*]
+}
+
+// ParsePath parses a rule path such as `metadata.annotations['a/b']` or
+// `spec.containers[*].image`.
+func ParsePath(p string) ([]Segment, error) {
+	segs, err := parsePath(p)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Segment, len(segs))
+	for i, s := range segs {
+		out[i] = Segment{Key: s.key, Index: s.index, All: s.all}
+	}
+	return out, nil
 }

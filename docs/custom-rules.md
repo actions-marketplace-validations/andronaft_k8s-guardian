@@ -51,7 +51,7 @@ spec:
 * dots between keys: `spec.template.metadata.labels`
 * quoted keys for dots or slashes: `metadata.annotations['example.com/owner']`
 * index: `ports[0].containerPort`
-* every element: `volumes[*].name` (all elements must satisfy the condition)
+* every element: `volumes[*].name`. **All** elements must satisfy the condition. For `exists`, `equals`, `in` and `matches`, the list must also be non-empty. For the other operators, a missing or empty list passes.
 
 ### Operators
 
@@ -68,3 +68,11 @@ Combine a comparison with `exists` to require the field too.
 ## Examples
 
 See [`examples/rules/org-policies.yaml`](../examples/rules/org-policies.yaml): a contact email annotation, trusted registries, a CPU ceiling, and LoadBalancer source ranges.
+
+## Enforcing rules in the cluster
+
+`k8s-guardian export vap` translates custom rules (and most built-ins) into
+Kubernetes ValidatingAdmissionPolicies with CEL expressions that have the
+same semantics as the CLI engine. Resource-scoped rules need `match.kinds` to
+be exportable. An e2e test suite runs every operator against a real API
+server to make sure both agree.

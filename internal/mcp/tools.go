@@ -12,6 +12,7 @@ import (
 	"github.com/andronaft/k8s-guardian/internal/cost"
 	"github.com/andronaft/k8s-guardian/internal/custom"
 	"github.com/andronaft/k8s-guardian/internal/diff"
+	"github.com/andronaft/k8s-guardian/internal/export"
 	"github.com/andronaft/k8s-guardian/internal/live"
 	"github.com/andronaft/k8s-guardian/internal/manifest"
 	"github.com/andronaft/k8s-guardian/internal/quantity"
@@ -26,6 +27,7 @@ type toolArgs struct {
 	Resource  string `json:"resource"`
 	Namespace string `json:"namespace"`
 	Rule      string `json:"rule"`
+	Builtin   string `json:"builtin"`
 }
 
 const customRuleHelp = `Rule format (YAML):
@@ -71,6 +73,14 @@ var tools = append(baseTools,
 		"inputSchema": schema(map[string]any{
 			"yaml": map[string]string{"type": "string", "description": "Kubernetes manifest YAML"},
 		}, "yaml"),
+	},
+	map[string]any{
+		"name":        "export_admission_policies",
+		"description": "Export k8s-guardian built-in rules and custom rules (from .k8s-guardian/rules and/or the given rule YAML) as Kubernetes ValidatingAdmissionPolicies (CEL) that the API server enforces.",
+		"inputSchema": schema(map[string]any{
+			"rule":    map[string]string{"type": "string", "description": "Optional extra custom rule YAML"},
+			"builtin": map[string]string{"type": "string", "description": "all (default), none, or comma separated built-in rule IDs"},
+		}),
 	},
 	map[string]any{
 		"name":        "validate_custom_rule",
@@ -164,6 +174,39 @@ func (s *Server) callTool(ctx context.Context, name string, raw json.RawMessage)
 		}
 		fmt.Fprintf(&b, "Total (min replicas): $%.2f/month at $%.4f/vCPU-h and $%.4f/GiB-h\n", total, p.CPUHour, p.GiBHour)
 		return b.String(), false
+	case "export_admission_policies":
+		ids := export.BuiltinIDs()
+		switch b := strings.TrimSpace(args.Builtin); strings.ToLower(b) {
+		case "", "all":
+		case "none":
+			ids = nil
+		default:
+			ids = strings.Split(b, ",")
+		}
+		paths := []string{custom.DefaultDir}
+		if env := os.Getenv("K8S_GUARDIAN_RULES"); env != "" {
+			paths = append(paths, filepath.SplitList(env)...)
+		}
+		docs, _, err := custom.LoadDocuments(paths)
+		if err != nil {
+			return err.Error(), true
+		}
+		if args.Rule != "" {
+			extra, err := custom.Parse([]byte(args.Rule), "rule.yaml")
+			if err != nil {
+				return err.Error(), true
+			}
+			docs = append(docs, extra...)
+		}
+		res, err := export.VAP(ids, docs, export.Options{})
+		if err != nil {
+			return err.Error(), true
+		}
+		out := string(res.YAML)
+		for _, sk := range res.Skipped {
+			out += "# skipped " + sk + "\n"
+		}
+		return out, false
 	case "validate_custom_rule":
 		docs, err := custom.Parse([]byte(args.Rule), "rule.yaml")
 		if err != nil {
