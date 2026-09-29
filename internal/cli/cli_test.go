@@ -211,3 +211,38 @@ func TestLiveAndDiffWithFakeCluster(t *testing.T) {
 		t.Errorf("unexpected diff json (%d): %s", code, out)
 	}
 }
+
+func TestKustomize(t *testing.T) {
+	fakeKubectl(t)
+	dir := "testdata/kustomize/app"
+	code, out, _ := run(t, "check", "-k", dir)
+	if code != ExitFindings || !strings.Contains(out, "testdata/kustomize/app (kustomize)  Pod/p") || !strings.Contains(out, "KG010") {
+		t.Errorf("-k: code %d\n%s", code, out)
+	}
+	// -f on a kustomization directory renders it as well, and --fix prints
+	// the fixed YAML because rendered output can't be written back.
+	_, out, _ = run(t, "check", "-f", dir, "--fix")
+	if !strings.Contains(out, "namespace: shop") || !strings.Contains(out, "runAsNonRoot: true") {
+		t.Errorf("fixed kustomize output:\n%s", out)
+	}
+	if code, _, errOut := run(t, "check", "-k", "testdata"); code != ExitError || !strings.Contains(errOut, "no kustomization.yaml") {
+		t.Errorf("-k on a plain dir: %d %s", code, errOut)
+	}
+}
+
+func TestCostUsage(t *testing.T) {
+	fakeKubectl(t)
+	code, out, errOut := run(t, "cost", "-f", costly, "-f", insecure, "--usage")
+	if code != ExitOK {
+		t.Fatalf("exit %d: %s", code, errOut)
+	}
+	// orders-api requests 4 CPU / 8Gi but uses ~15m / 48Mi.
+	for _, want := range []string{`"api" uses cpu 15m / memory 48Mi (requests 4 / 8Gi): suggest cpu 30m, memory 80Mi`, "POTENTIAL SAVINGS", "sampled from 2 running pod(s)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("missing %q in:\n%s", want, out)
+		}
+	}
+	if !strings.Contains(errOut, "Deployment/web: could not read metrics") {
+		t.Errorf("expected a metrics note, got %q", errOut)
+	}
+}

@@ -85,8 +85,9 @@ func (f *File) addObject(root *yaml.Node) {
 			return
 		}
 	}
-	// Skip empty documents and k8s-guardian's own custom rule files.
-	if o.Kind() == "" || strings.HasPrefix(o.APIVersion(), "k8s-guardian.io/") {
+	// Skip empty documents, k8s-guardian's own custom rule files and
+	// Kustomize configuration (only meaningful when rendered).
+	if o.Kind() == "" || strings.HasPrefix(o.APIVersion(), "k8s-guardian.io/") || strings.HasPrefix(o.APIVersion(), "kustomize.config.k8s.io/") {
 		return
 	}
 	f.Objects = append(f.Objects, o)
@@ -135,6 +136,13 @@ func Load(path string) ([]*File, error) {
 	}
 	if isChart(path) {
 		f, err := renderChart(path)
+		if err != nil {
+			return nil, err
+		}
+		return []*File{f}, nil
+	}
+	if IsKustomization(path) {
+		f, err := RenderKustomization(path)
 		if err != nil {
 			return nil, err
 		}
@@ -202,4 +210,49 @@ func renderChart(dir string) (*File, error) {
 	}
 	f.Writable = false
 	return f, nil
+}
+
+var kustomizationFiles = []string{"kustomization.yaml", "kustomization.yml", "Kustomization"}
+
+// IsKustomization reports whether dir contains a kustomization file.
+func IsKustomization(dir string) bool {
+	for _, name := range kustomizationFiles {
+		if _, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+// RenderKustomization builds a Kustomize directory with `kustomize build`,
+// falling back to `kubectl kustomize`. Nested kustomizations inside a walked
+// directory are not rendered automatically (bases and overlays would be
+// reported twice); pass the overlay directory itself with -f or -k.
+func RenderKustomization(dir string) (*File, error) {
+	var cmd *exec.Cmd
+	switch {
+	case lookPath("kustomize"):
+		cmd = exec.Command("kustomize", "build", dir)
+	case lookPath("kubectl"):
+		cmd = exec.Command("kubectl", "kustomize", dir)
+	default:
+		return nil, fmt.Errorf("%s is a Kustomize directory but neither `kustomize` nor `kubectl` was found in PATH", dir)
+	}
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("%s %s: %v: %s", cmd.Args[0], strings.Join(cmd.Args[1:], " "), err, strings.TrimSpace(stderr.String()))
+	}
+	f, err := Parse(out, dir+" (kustomize)")
+	if err != nil {
+		return nil, err
+	}
+	f.Writable = false
+	return f, nil
+}
+
+func lookPath(name string) bool {
+	_, err := exec.LookPath(name)
+	return err == nil
 }

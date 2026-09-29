@@ -38,7 +38,7 @@ func WriteGitHub(w io.Writer, fs []rules.Finding) {
 // isFile reports whether a finding source is a real file in the workspace
 // (not stdin, a rendered Helm chart or a cluster object).
 func isFile(src string) bool {
-	return src != "" && !strings.HasPrefix(src, "<") && !strings.HasPrefix(src, "cluster") && !strings.Contains(src, "(helm template)")
+	return src != "" && !strings.HasPrefix(src, "<") && !strings.HasPrefix(src, "cluster") && !strings.Contains(src, "(helm template)") && !strings.Contains(src, "(kustomize)")
 }
 
 func describe(f rules.Finding) string {

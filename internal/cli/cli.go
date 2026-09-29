@@ -105,7 +105,8 @@ func (a *App) Run(args []string) int {
 
 func hasFileFlag(args []string) bool {
 	for _, a := range args {
-		if a == "-f" || a == "--filename" || a == "--file" || strings.HasPrefix(a, "-f=") || strings.HasPrefix(a, "--filename=") {
+		if a == "-f" || a == "--filename" || a == "--file" || a == "-k" || a == "--kustomize" ||
+			strings.HasPrefix(a, "-f=") || strings.HasPrefix(a, "--filename=") || strings.HasPrefix(a, "-k=") {
 			return true
 		}
 	}
@@ -139,7 +140,7 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 
 // flags holds every option; each command registers the subset it supports.
 type flags struct {
-	files, rulePaths                multi
+	files, rulePaths, kustomize     multi
 	format, failOn, skip, model     string
 	fix, ai, stdout, live, interact bool
 	namespace, kubeContext          string
@@ -160,6 +161,8 @@ func (f *flags) input(fs *flag.FlagSet) {
 	fs.Var(&f.files, "f", "manifest file, directory, Helm chart or - for stdin (repeatable)")
 	fs.Var(&f.files, "filename", "alias for -f")
 	fs.Var(&f.files, "file", "alias for -f")
+	fs.Var(&f.kustomize, "k", "Kustomize directory to render and check (repeatable; -f on a kustomization dir works too)")
+	fs.Var(&f.kustomize, "kustomize", "alias for -k")
 }
 
 func (f *flags) output(fs *flag.FlagSet, formats string) {
@@ -200,9 +203,21 @@ func (f *flags) options() (rules.Options, error) {
 	return opts, nil
 }
 
+// addInputs merges positional paths and -k directories into f.files.
+func (f *flags) addInputs(pos []string) error {
+	f.files = append(f.files, pos...)
+	for _, k := range f.kustomize {
+		if !manifest.IsKustomization(k) {
+			return fmt.Errorf("-k %s: no kustomization.yaml in that directory", k)
+		}
+		f.files = append(f.files, k)
+	}
+	return nil
+}
+
 func loadFiles(paths []string) ([]*manifest.File, error) {
 	if len(paths) == 0 {
-		return nil, errors.New("no input: pass -f <file|dir|->")
+		return nil, errors.New("no input: pass -f <file|dir|-> or -k <kustomize dir>")
 	}
 	var loaded []*manifest.File
 	for _, p := range paths {
@@ -273,6 +288,7 @@ func (a *App) usage() {
 
 Validate:
   %[1]s check -f <file|dir|chart|->         Validate manifests (files, directories, Helm charts, stdin)
+  %[1]s check -k overlays/prod              Validate a Kustomize overlay
   %[1]s check -f app.yaml --live -n prod    ...and against the real cluster: quotas, node capacity,
                                             LimitRanges, missing ConfigMaps/Secrets, CRDs, StorageClasses
   %[1]s audit deployment/my-app -n prod     Validate live cluster resources
@@ -285,7 +301,8 @@ Fix:
 Before you deploy:
   %[1]s diff -f app.yaml -n prod            Compare with the cluster and flag breaking changes
                                             (immutable selectors, removed APIs, downtime, port changes)
-  %[1]s cost -f app.yaml [--ai]             Estimate $/month; Claude right-sizes requests and shows savings
+  %[1]s cost -f app.yaml [--usage] [--ai]   Estimate $/month; compare with real usage (metrics-server);
+                                            Claude right-sizes requests and shows savings
 
 Policies & integrations:
   %[1]s rule create "<policy in plain English>"   Generate a custom rule with Claude

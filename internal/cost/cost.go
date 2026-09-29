@@ -9,6 +9,7 @@ import (
 	"strconv"
 
 	"github.com/andronaft/k8s-guardian/internal/ai"
+	"github.com/andronaft/k8s-guardian/internal/cluster"
 	"github.com/andronaft/k8s-guardian/internal/manifest"
 	"github.com/andronaft/k8s-guardian/internal/quantity"
 	"github.com/andronaft/k8s-guardian/internal/rules"
@@ -57,6 +58,15 @@ type Container struct {
 	MilliCPU int64  `json:"milliCpu"`
 	Memory   int64  `json:"memoryBytes"`
 	Missing  bool   `json:"missingRequests,omitempty"`
+
+	// Observed usage (cost --usage), averaged over the running pods.
+	UsedCPU    int64 `json:"usedMilliCpu,omitempty"`
+	UsedMemory int64 `json:"usedMemoryBytes,omitempty"`
+	HasUsage   bool  `json:"hasUsage,omitempty"`
+	// Offline suggestion derived from usage (with headroom).
+	SuggestedCPU    int64   `json:"suggestedMilliCpu,omitempty"`
+	SuggestedMemory int64   `json:"suggestedMemoryBytes,omitempty"`
+	UsageSavings    float64 `json:"usageMonthlySavings,omitempty"`
 
 	node *rules.Container
 }
@@ -203,6 +213,9 @@ func RightSize(ctx context.Context, client *ai.Client, ws []*Workload, p Pricing
 					}
 				}
 			}
+			if c.HasUsage {
+				ci.ObservedUsage = map[string]string{"cpu": quantity.FormatCPU(c.UsedCPU), "memory": quantity.FormatBytes(c.UsedMemory)}
+			}
 			wi.Containers = append(wi.Containers, ci)
 		}
 		in = append(in, wi)
@@ -277,4 +290,76 @@ func orZero(s string) string {
 		return "0"
 	}
 	return s
+}
+
+// Headroom applied to observed usage when suggesting requests.
+const (
+	CPUHeadroom    = 2.0 // CPU is compressible; bursts are throttled, not killed
+	MemoryHeadroom = 1.5
+	minCPU         = 10       // millicores
+	minMemory      = 32 << 20 // bytes
+)
+
+// AttachUsage reads live usage from metrics-server for every workload and
+// derives offline right-sizing suggestions. It returns notes about
+// workloads it could not measure.
+func AttachUsage(ws []*Workload, c cluster.Cluster, defaultNS string, p Pricing) []string {
+	var notes []string
+	for _, w := range ws {
+		if w.Kind == "Job" || w.Kind == "CronJob" {
+			continue
+		}
+		sel := selector(w)
+		if len(sel) == 0 {
+			notes = append(notes, w.Resource+": no selector/labels to find its pods")
+			continue
+		}
+		ns := w.Namespace
+		if ns == "" {
+			ns = defaultNS
+		}
+		usage, pods, err := c.PodUsage(ns, sel)
+		if err != nil {
+			notes = append(notes, fmt.Sprintf("%s: could not read metrics (is metrics-server installed?): %v", w.Resource, err))
+			continue
+		}
+		if pods == 0 {
+			notes = append(notes, w.Resource+": no running pods found, usage unknown")
+			continue
+		}
+		for i := range w.Containers {
+			ct := &w.Containers[i]
+			u, ok := usage[ct.Name]
+			if !ok || ct.Init {
+				continue
+			}
+			ct.UsedCPU, _ = quantity.MilliCPU(u.CPU)
+			ct.UsedMemory, _ = quantity.Bytes(u.Memory)
+			ct.HasUsage = true
+			ct.SuggestedCPU = roundUp(max(int64(float64(ct.UsedCPU)*CPUHeadroom), minCPU), 5)
+			ct.SuggestedMemory = roundUp(max(int64(float64(ct.UsedMemory)*MemoryHeadroom), minMemory), 16<<20)
+			ct.UsageSavings = (p.Monthly(ct.MilliCPU, ct.Memory) - p.Monthly(ct.SuggestedCPU, ct.SuggestedMemory)) * float64(w.MinReplicas)
+		}
+		w.Notes = append(w.Notes, fmt.Sprintf("usage sampled from %d running pod(s) (point-in-time snapshot, check peak load before cutting requests)", pods))
+	}
+	return notes
+}
+
+func selector(w *Workload) map[string]string {
+	root := w.target.Obj.Root
+	n := yamlx.Path(root, "spec", "selector", "matchLabels")
+	if w.Kind == "Pod" {
+		n = yamlx.Path(root, "metadata", "labels")
+	}
+	out := map[string]string{}
+	if n != nil {
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			out[n.Content[i].Value] = n.Content[i+1].Value
+		}
+	}
+	return out
+}
+
+func roundUp(v, step int64) int64 {
+	return (v + step - 1) / step * step
 }

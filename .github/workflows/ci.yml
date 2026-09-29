@@ -16,6 +16,8 @@ jobs:
         with:
           go-version-file: go.mod
       - run: make lint
+      - name: staticcheck
+        run: go run honnef.co/go/tools/cmd/staticcheck@v0.6.1 ./...
       - name: Test (race detector)
         run: go test -race ./...
       - run: make build
@@ -28,6 +30,8 @@ jobs:
           ./bin/k8s-guardian rule validate examples/rules
           ./bin/k8s-guardian cost -f examples/costly-app.yaml
           ./bin/kubectl-guard version
+          kubectl kustomize examples/kustomize/overlays/prod >/dev/null
+          ./bin/k8s-guardian check -k examples/kustomize/overlays/prod --fail-on info --skip KG003,KG005,KG006,KG007,KG008,KG009,KG013,KG014 --format github
 
   # Exercises the GitHub Action defined in action.yml.
   action:

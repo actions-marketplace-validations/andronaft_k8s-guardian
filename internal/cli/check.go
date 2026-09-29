@@ -33,7 +33,9 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
-	f.files = append(f.files, pos...)
+	if err := f.addInputs(pos); err != nil {
+		return ExitError, err
+	}
 	if f.interact {
 		return a.runInteractive(&f)
 	}

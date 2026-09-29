@@ -24,6 +24,8 @@ type ContainerInput struct {
 	EnvNames  []string          `json:"envNames,omitempty"`
 	Command   []string          `json:"command,omitempty"`
 	Resources map[string]string `json:"resources"`
+	// ObservedUsage is the current average usage from metrics-server, when known.
+	ObservedUsage map[string]string `json:"observedUsage,omitempty"`
 }
 
 // Recommendation is Claude's right-sizing advice for one container.
@@ -45,6 +47,8 @@ and recommend steady-state resource requests and a memory limit.
 Guidelines:
 - Be realistic, not stingy: JVM services need heap + metaspace headroom, databases and caches need memory for their working set.
 - Typical stateless Go/Rust HTTP services: 50m-500m CPU, 64Mi-512Mi memory. Node.js/Python: 100m-500m, 128Mi-512Mi. JVM: 250m-1, 512Mi-2Gi.
+- If observedUsage is present, it is a point-in-time average from metrics-server: base the recommendation on it, with headroom
+  for peaks (CPU ~2x, memory ~1.5x and never below the working set of the runtime, e.g. JVM heap). Mention it in the reason.
 - If the current values already look reasonable, repeat them unchanged and say so.
 - memory_limit must be >= memory_request. Use Kubernetes quantity syntax (500m, 1, 256Mi, 1Gi).
 - reason: one or two sentences, mention the inferred workload type and why the values fit.

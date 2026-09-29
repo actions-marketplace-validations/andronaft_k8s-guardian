@@ -35,7 +35,9 @@ func (a *App) diff(args []string) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
-	f.files = append(f.files, pos...)
+	if err := f.addInputs(pos); err != nil {
+		return ExitError, err
+	}
 	failOn, err := rules.ParseSeverity(f.failOn)
 	if err != nil {
 		return ExitError, err
@@ -134,8 +136,11 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 	var f flags
 	var apply bool
 	p := cost.DefaultPricing()
-	fs := a.flagSet("cost", "cost -f <file|dir|chart|-> [--ai [--apply]] [--cpu-hour 0.0316] [--gib-hour 0.0042] [flags]")
+	var usage bool
+	fs := a.flagSet("cost", "cost -f <file|dir|chart|-> [--usage [-n ns]] [--ai [--apply]] [--cpu-hour 0.0316] [--gib-hour 0.0042] [flags]")
 	f.input(fs)
+	f.cluster(fs)
+	fs.BoolVar(&usage, "usage", false, "compare requests with real usage from the cluster (kubectl top, needs metrics-server) and suggest right-sized values")
 	fs.StringVar(&f.format, "format", "text", "output format: text, json")
 	fs.StringVar(&f.format, "o", "text", "shorthand for --format")
 	f.aiFlags(fs, "ask Claude to right-size requests for each container and estimate savings")
@@ -146,7 +151,9 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
-	f.files = append(f.files, pos...)
+	if err := f.addInputs(pos); err != nil {
+		return ExitError, err
+	}
 	if apply && !f.ai {
 		return ExitError, errors.New("--apply requires --ai")
 	}
@@ -156,6 +163,19 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 		return ExitError, err
 	}
 	ws := cost.Estimate(objects(files), p)
+	if usage && len(ws) > 0 {
+		cl, err := cluster.NewKubectl(f.kubeContext)
+		if err != nil {
+			return ExitError, err
+		}
+		ns := f.namespace
+		if ns == "" {
+			ns = cl.DefaultNamespace()
+		}
+		for _, n := range cost.AttachUsage(ws, cl, ns, p) {
+			fmt.Fprintf(a.Stderr, "note: %s\n", n)
+		}
+	}
 	var advice []cost.Advice
 	if f.ai && len(ws) > 0 {
 		client := ai.New(f.model)
@@ -206,7 +226,7 @@ func (a *App) writeCost(ws []*cost.Workload, advice []cost.Advice, p cost.Pricin
 		return
 	}
 	fmt.Fprintf(a.Stdout, "%-40s %-9s %-9s %-9s %s\n", "WORKLOAD", "REPLICAS", "CPU/POD", "MEM/POD", "$/MONTH")
-	var totalMin, totalMax float64
+	var totalMin, totalMax, usageSaved float64
 	for _, w := range ws {
 		name := w.Resource
 		if w.Namespace != "" {
@@ -222,6 +242,22 @@ func (a *App) writeCost(ws []*cost.Workload, advice []cost.Advice, p cost.Pricin
 		for _, n := range w.Notes {
 			fmt.Fprintf(a.Stdout, "    ↳ %s\n", n)
 		}
+		for _, c := range w.Containers {
+			if !c.HasUsage {
+				continue
+			}
+			fmt.Fprintf(a.Stdout, "    📈 %q uses cpu %s / memory %s (requests %s / %s)", c.Name,
+				quantity.FormatCPU(c.UsedCPU), quantity.FormatBytes(c.UsedMemory), quantity.FormatCPU(c.MilliCPU), quantity.FormatBytes(c.Memory))
+			switch {
+			case c.UsedMemory > c.Memory && c.Memory > 0, c.UsedCPU > c.MilliCPU && c.MilliCPU > 0:
+				fmt.Fprintf(a.Stdout, ": ⚠ under-provisioned, suggest cpu %s, memory %s\n", quantity.FormatCPU(c.SuggestedCPU), quantity.FormatBytes(c.SuggestedMemory))
+			case c.UsageSavings > 0.5:
+				fmt.Fprintf(a.Stdout, ": suggest cpu %s, memory %s → saves ~%s/mo\n", quantity.FormatCPU(c.SuggestedCPU), quantity.FormatBytes(c.SuggestedMemory), money(c.UsageSavings))
+				usageSaved += c.UsageSavings
+			default:
+				fmt.Fprintln(a.Stdout, ": ✔ well sized")
+			}
+		}
 		totalMin += w.MonthlyMin
 		totalMax += w.MonthlyMax
 	}
@@ -230,6 +266,9 @@ func (a *App) writeCost(ws []*cost.Workload, advice []cost.Advice, p cost.Pricin
 		total += "–" + money(totalMax)
 	}
 	fmt.Fprintf(a.Stdout, "%-70s %s\n", "TOTAL", total)
+	if usageSaved > 0 {
+		fmt.Fprintf(a.Stdout, "%-70s ~%s/month (%.0f%%) based on observed usage\n", "POTENTIAL SAVINGS", money(usageSaved), usageSaved/totalMin*100)
+	}
 	fmt.Fprintf(a.Stdout, "\nPrices: $%.4f per vCPU-hour, $%.4f per GiB-hour, %d h/month, based on requests (override with --cpu-hour/--gib-hour).\n", p.CPUHour, p.GiBHour, cost.HoursPerMonth)
 
 	if len(advice) == 0 {
@@ -272,7 +311,9 @@ func (a *App) interactive(args []string) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
-	f.files = append(f.files, pos...)
+	if err := f.addInputs(pos); err != nil {
+		return ExitError, err
+	}
 	return a.runInteractive(&f)
 }
 

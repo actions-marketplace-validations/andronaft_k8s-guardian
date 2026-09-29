@@ -1,0 +1,28 @@
+name: Bug report
+description: Something doesn't work as expected
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `k8s-guardian version`
+    validations: {required: true}
+  - type: textarea
+    id: command
+    attributes:
+      label: Command and output
+      description: The exact command you ran and what it printed.
+      render: shell
+    validations: {required: true}
+  - type: textarea
+    id: manifest
+    attributes:
+      label: Minimal manifest
+      description: The smallest YAML that reproduces the problem (remove secrets!).
+      render: yaml
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+    validations: {required: true}

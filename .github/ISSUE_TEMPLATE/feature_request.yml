@@ -1,0 +1,19 @@
+name: Feature or rule request
+description: Suggest a new rule, check or integration
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would it solve?
+    validations: {required: true}
+  - type: textarea
+    id: example
+    attributes:
+      label: Example manifest / expected finding
+      render: yaml
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options: [Built-in rule, Custom rules, Live cluster checks, Diff, Cost, Interactive TUI, MCP server, GitHub Action, Other]

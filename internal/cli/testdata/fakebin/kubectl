@@ -56,5 +56,17 @@ spec:
   ports: [{port: 443, targetPort: 8000, protocol: TCP}]
 Y
     ;;
+  "top pods --containers --no-headers -n shop -l app=orders-api")
+    printf 'orders-api-7d9f-a   api   12m   40Mi\norders-api-7d9f-b   api   18m   56Mi\n' ;;
+  "top pods --containers --no-headers -n shop -l app=web")
+    echo "error: Metrics API not available" >&2; exit 1 ;;
+  kustomize\ *)
+    # Minimal stand-in for `kubectl kustomize DIR`: concatenate the resources
+    # and apply the namespace from kustomization.yaml.
+    dir="${args#kustomize }"
+    ns=$(sed -n 's/^namespace: *//p' "$dir/kustomization.yaml")
+    for f in $(sed -n 's/^ *- *\(.*\.yaml\)$/\1/p' "$dir/kustomization.yaml"); do
+      echo "---"; sed "s/^metadata:$/metadata:\n  namespace: $ns/" "$dir/$f"
+    done ;;
   *) echo "Error from server (NotFound): $args not found" >&2; exit 1 ;;
 esac

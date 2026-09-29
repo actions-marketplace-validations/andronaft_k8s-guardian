@@ -7,12 +7,15 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"os/exec"
+	"sort"
 	"strings"
 	"sync"
 
 	"github.com/andronaft/k8s-guardian/internal/kube"
 	"github.com/andronaft/k8s-guardian/internal/manifest"
+	"github.com/andronaft/k8s-guardian/internal/quantity"
 )
 
 // ErrNotFound is returned by Get when an object does not exist.
@@ -73,6 +76,16 @@ type Cluster interface {
 	PriorityClasses() (map[string]bool, error)
 	// Get returns a live object (cleaned of server fields) or ErrNotFound.
 	Get(kind, apiVersion, namespace, name string) (*manifest.Object, error)
+	// PodUsage returns the current CPU/memory usage (metrics-server) of the
+	// pods matching selector, averaged per container name, and the number
+	// of pods sampled.
+	PodUsage(namespace string, selector map[string]string) (map[string]Usage, int, error)
+}
+
+// Usage is the observed consumption of a container.
+type Usage struct {
+	CPU    string // e.g. "12m"
+	Memory string // e.g. "48Mi"
 }
 
 // Kubectl implements Cluster by shelling out to kubectl.
@@ -359,4 +372,64 @@ func (k *Kubectl) Get(kind, apiVersion, namespace, name string) (*manifest.Objec
 	}
 	kube.Clean(f.Objects[0])
 	return f.Objects[0], nil
+}
+
+// PodUsage runs `kubectl top pods --containers` (requires metrics-server).
+func (k *Kubectl) PodUsage(namespace string, selector map[string]string) (map[string]Usage, int, error) {
+	var sel []string
+	for key, v := range selector {
+		sel = append(sel, key+"="+v)
+	}
+	sort.Strings(sel)
+	args := []string{"top", "pods", "--containers", "--no-headers"}
+	if namespace != "" {
+		args = append(args, "-n", namespace)
+	}
+	if len(sel) > 0 {
+		args = append(args, "-l", strings.Join(sel, ","))
+	}
+	out, err := k.run(args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	return ParseTop(string(out))
+}
+
+// ParseTop parses `kubectl top pods --containers --no-headers` output
+// ("POD CONTAINER CPU MEMORY" per line) into per-container averages.
+func ParseTop(out string) (map[string]Usage, int, error) {
+	type acc struct {
+		cpu, mem float64
+		n        int
+	}
+	sums := map[string]*acc{}
+	pods := map[string]bool{}
+	for _, line := range strings.Split(out, "\n") {
+		f := strings.Fields(line)
+		if len(f) < 4 {
+			continue
+		}
+		cpu, err1 := quantity.Parse(f[2])
+		mem, err2 := quantity.Parse(f[3])
+		if err1 != nil || err2 != nil {
+			continue
+		}
+		pods[f[0]] = true
+		a := sums[f[1]]
+		if a == nil {
+			a = &acc{}
+			sums[f[1]] = a
+		}
+		a.cpu += cpu
+		a.mem += mem
+		a.n++
+	}
+	res := map[string]Usage{}
+	for name, a := range sums {
+		res[name] = Usage{
+			CPU:    quantity.FormatCPU(int64(math.Round(a.cpu / float64(a.n) * 1000))),
+			Memory: quantity.FormatBytes(int64(math.Round(a.mem / float64(a.n)))),
+		}
+	}
+	return res, len(pods), nil
 }

@@ -3,6 +3,9 @@
 > **AI-powered Kubernetes guardrails that know your cluster**: a CLI, a `kubectl` plugin and an MCP server in one binary.
 
 [![CI](https://github.com/andronaft/k8s-guardian/actions/workflows/ci.yml/badge.svg)](https://github.com/andronaft/k8s-guardian/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/andronaft/k8s-guardian)](https://github.com/andronaft/k8s-guardian/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/andronaft/k8s-guardian)](https://goreportcard.com/report/github.com/andronaft/k8s-guardian)
+[![Docker](https://img.shields.io/badge/ghcr.io-k8s--guardian-blue?logo=docker)](https://github.com/andronaft/k8s-guardian/pkgs/container/k8s-guardian)
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 Most Kubernetes linters are static: they read a YAML file and print an error. `k8s-guardian` also answers the questions you hit **at deploy time**:
@@ -23,7 +26,7 @@ Most Kubernetes linters are static: they read a YAML file and print an error. `k
 | 🖥️ | **Interactive review TUI**: finding on the left, colored diff on the right, `[y]` accept `[n]` skip `[e]` edit | `interactive -f` |
 | 🌐 | **Live cluster context**: ResourceQuota headroom, node capacity with nodeSelector, LimitRanges, missing ConfigMaps/Secrets/SAs/PVCs, CRDs, StorageClasses | `check --live` |
 | 🔀 | **Breaking-change detector**: compares with what is deployed, flags immutable fields, selector drift, removed APIs for *your* cluster version, Recreate downtime, HPA conflicts | `diff -f` |
-| 💰 | **Cost estimation + AI right-sizing**: $/month per workload (HPA-aware), and Claude recommends requests per workload type with the savings | `cost -f [--ai]` |
+| 💰 | **Cost estimation + right-sizing**: $/month per workload (HPA-aware), real usage from metrics-server, Claude recommendations with savings | `cost -f [--usage] [--ai]` |
 | 📜 | **Policies from plain language**: *"forbid :latest and require a contact email"* becomes a validated rule | `rule create "…"` |
 | 🔌 | **kubectl plugin** | `kubectl guard …` |
 | 🧠 | **MCP server** for Claude Code / Cursor: validate, fix, live-check, diff, cost, custom rules | `mcp` |
@@ -44,8 +47,8 @@ make build && sudo make install
 # Docker (multi-arch, published to GHCR on every release)
 docker run --rm -v "$PWD:/work" ghcr.io/andronaft/k8s-guardian check -f .
 
-# Krew (once published to krew-index)
-kubectl krew install guard
+# Krew: from the manifest in this repo (until it is listed in krew-index)
+kubectl krew install --manifest-url=https://raw.githubusercontent.com/andronaft/k8s-guardian/main/docs/krew/guard.yaml
 ```
 
 ## 🚀 Quick tour
@@ -54,6 +57,7 @@ kubectl krew install guard
 
 ```bash
 k8s-guardian check -f k8s/                      # files, directories, Helm charts, stdin (-f -)
+k8s-guardian check -k overlays/prod             # Kustomize overlays (also: -f on a kustomization dir)
 k8s-guardian check -f deploy.yaml --fix         # deterministic fixes, in place, comments kept
 k8s-guardian check -f deploy.yaml --fix --ai    # + Claude for the rest (needs ANTHROPIC_API_KEY)
 ```
@@ -151,6 +155,7 @@ The diff compares only the fields you declare, so server defaults don't show up 
 
 ```bash
 k8s-guardian cost -f k8s/                       # offline estimate
+k8s-guardian cost -f k8s/ --usage -n prod       # + real usage from metrics-server (kubectl top)
 k8s-guardian cost -f k8s/ --ai                  # + Claude right-sizing with savings
 k8s-guardian cost -f k8s/ --ai --apply          # write the recommendations into the files
 ```
@@ -166,7 +171,16 @@ Deployment/orders-api (shop)             4-10      4         8Gi       $467.20�
     cpu 4, memory 8Gi  →  cpu 500m, memory 512Mi (limit 1Gi): saves ~$414.93/mo
 ```
 
-(The advice block is an example of the output format.) Prices default to $0.0316 per vCPU-hour and $0.0042 per GiB-hour, which approximate on-demand general-purpose nodes. Set your own with `--cpu-hour`/`--gib-hour` or `K8S_GUARDIAN_CPU_HOUR`/`K8S_GUARDIAN_GIB_HOUR`. Only image names, ports, env var **names**, commands and resources are sent to Claude, never env values or Secrets.
+With `--usage`, the requests are compared with what the pods actually consume right now (`kubectl top`, averaged per container). The tool then suggests right-sized requests (2× CPU and 1.5× memory headroom) and prices the difference:
+
+```text
+    📈 "api" uses cpu 15m / memory 48Mi (requests 4 / 8Gi): suggest cpu 30m, memory 80Mi → saves ~$463.01/mo
+POTENTIAL SAVINGS                                                      ~$463.01/month (99%) based on observed usage
+```
+
+Usage is a point-in-time snapshot, so check your peak load before cutting requests. With `--usage --ai`, Claude also gets the observed usage, which makes its recommendations much more accurate.
+
+(The advice block above is an example of the output format.) Prices default to $0.0316 per vCPU-hour and $0.0042 per GiB-hour, which approximate on-demand general-purpose nodes. Set your own with `--cpu-hour`/`--gib-hour` or `K8S_GUARDIAN_CPU_HOUR`/`K8S_GUARDIAN_GIB_HOUR`. Only image names, ports, env var **names**, commands and resources are sent to Claude, never env values or Secrets.
 
 ### 6. Company policies in plain language: `rule create`
 
@@ -357,12 +371,14 @@ internal/mcp         MCP stdio server
 - [x] v0.1: CLI validator, `--fix`, AI fix, kubectl plugin
 - [x] v0.2: MCP server
 - [x] v0.3: live cluster context, interactive TUI, breaking-change diff, cost estimation, natural-language rules, GitHub Action
-- [ ] Real usage data for right-sizing (metrics-server / Prometheus)
-- [ ] Kustomize support (`-k`)
+- [x] v0.4: Kustomize (`-k`), real-usage right-sizing (`cost --usage`), Krew manifest
+- [ ] Usage history from Prometheus (peaks, not a snapshot)
 - [ ] Export custom rules to Kyverno / ValidatingAdmissionPolicy (CEL)
 - [ ] Admission webhook mode
 
 ## 🛠️ Development
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Security issues: [SECURITY.md](SECURITY.md).
 
 ```bash
 make test    # unit tests (fake cluster + mocked Claude API, no credentials needed)

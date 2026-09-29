@@ -41,3 +41,7 @@ spec:
         matchLabels: {os: windows, arch: amd64}
       {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ .TagName }}_windows_amd64.zip" .TagName }}
       bin: kubectl-guard.exe
+    - selector:
+        matchLabels: {os: windows, arch: arm64}
+      {{addURIAndSha "https://github.com/andronaft/k8s-guardian/releases/download/{{ .TagName }}/kubectl-guard_{{ .TagName }}_windows_arm64.zip" .TagName }}
+      bin: kubectl-guard.exe

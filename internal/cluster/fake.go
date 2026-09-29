@@ -13,6 +13,15 @@ type Fake struct {
 	SCs        *StorageClasses
 	PCs        map[string]bool
 	Objects    map[string]*manifest.Object // "Kind/namespace/name"
+	Usage      map[string]map[string]Usage // "namespace/app-label" -> container -> usage
+}
+
+func (f *Fake) PodUsage(namespace string, selector map[string]string) (map[string]Usage, int, error) {
+	u, ok := f.Usage[namespace+"/"+selector["app"]]
+	if !ok {
+		return nil, 0, nil
+	}
+	return u, 2, nil
 }
 
 func (f *Fake) Version() (string, error)              { return f.GitVersion, nil }
