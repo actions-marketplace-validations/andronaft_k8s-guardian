@@ -71,7 +71,7 @@ jobs:
       - name: govulncheck
         env:
           GOTOOLCHAIN: auto
-        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest -show verbose ./...
 
   # Exercises the GitHub Action defined in action.yml.
   action:
