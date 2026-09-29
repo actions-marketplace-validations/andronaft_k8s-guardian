@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/andronaft/k8s-guardian/internal/k8sname"
 	"github.com/andronaft/k8s-guardian/internal/kube"
 	"github.com/andronaft/k8s-guardian/internal/manifest"
 	"github.com/andronaft/k8s-guardian/internal/quantity"
@@ -106,7 +107,7 @@ func NewKubectl(context string) (*Kubectl, error) {
 
 func (k *Kubectl) run(args ...string) ([]byte, error) {
 	if k.Context != "" {
-		args = append(args, "--context", k.Context)
+		args = append(args, "--context="+k.Context)
 	}
 	var stderr bytes.Buffer
 	cmd := exec.Command("kubectl", args...)
@@ -233,9 +234,12 @@ func (k *Kubectl) Nodes() ([]Node, error) {
 }
 
 func (k *Kubectl) Namespace(name string) (*Namespace, error) {
+	if err := k8sname.ValidNamespace(name); err != nil {
+		return nil, err
+	}
 	return cached(k, "ns/"+name, func() (*Namespace, error) {
 		ns := &Namespace{Name: name, Names: map[string]map[string]bool{}}
-		if _, err := k.run("get", "namespace", name, "-o", "name"); err != nil {
+		if _, err := k.run("get", "namespace/"+name, "-o", "name"); err != nil {
 			if errors.Is(err, ErrNotFound) {
 				return ns, nil
 			}
@@ -243,7 +247,7 @@ func (k *Kubectl) Namespace(name string) (*Namespace, error) {
 		}
 		ns.Exists = true
 
-		out, err := k.run("get", "resourcequota", "-n", name, "-o", "json")
+		out, err := k.run("get", "resourcequota", "--namespace="+name, "-o", "json")
 		if err != nil {
 			return nil, err
 		}
@@ -261,7 +265,7 @@ func (k *Kubectl) Namespace(name string) (*Namespace, error) {
 			ns.Quotas = append(ns.Quotas, Quota{Name: q.Metadata.Name, Hard: q.Status.Hard, Used: q.Status.Used})
 		}
 
-		out, err = k.run("get", "limitrange", "-n", name, "-o", "json")
+		out, err = k.run("get", "limitrange", "--namespace="+name, "-o", "json")
 		if err != nil {
 			return nil, err
 		}
@@ -287,7 +291,7 @@ func (k *Kubectl) Namespace(name string) (*Namespace, error) {
 			}
 		}
 
-		out, err = k.run("get", "configmaps,secrets,serviceaccounts,persistentvolumeclaims", "-n", name, "-o", "name")
+		out, err = k.run("get", "configmaps,secrets,serviceaccounts,persistentvolumeclaims", "--namespace="+name, "-o", "name")
 		if err != nil {
 			return nil, err
 		}
@@ -355,9 +359,22 @@ func resourceArg(kind, apiVersion string) string {
 }
 
 func (k *Kubectl) Get(kind, apiVersion, namespace, name string) (*manifest.Object, error) {
+	group, _, _ := strings.Cut(apiVersion, "/")
+	if !strings.Contains(apiVersion, "/") {
+		group = ""
+	}
+	if err := k8sname.ValidKind(kind, group); err != nil {
+		return nil, err
+	}
+	if err := k8sname.ValidName(name); err != nil {
+		return nil, err
+	}
 	args := []string{"get", resourceArg(kind, apiVersion) + "/" + name, "-o", "yaml"}
 	if namespace != "" {
-		args = append(args, "-n", namespace)
+		if err := k8sname.ValidNamespace(namespace); err != nil {
+			return nil, err
+		}
+		args = append(args, "--namespace="+namespace)
 	}
 	out, err := k.run(args...)
 	if err != nil {
@@ -376,17 +393,21 @@ func (k *Kubectl) Get(kind, apiVersion, namespace, name string) (*manifest.Objec
 
 // PodUsage runs `kubectl top pods --containers` (requires metrics-server).
 func (k *Kubectl) PodUsage(namespace string, selector map[string]string) (map[string]Usage, int, error) {
+	if err := k8sname.ValidNamespace(namespace); err != nil {
+		return nil, 0, err
+	}
+	if err := k8sname.ValidSelector(selector); err != nil {
+		return nil, 0, err
+	}
 	var sel []string
 	for key, v := range selector {
 		sel = append(sel, key+"="+v)
 	}
 	sort.Strings(sel)
 	args := []string{"top", "pods", "--containers", "--no-headers"}
-	if namespace != "" {
-		args = append(args, "-n", namespace)
-	}
+	args = append(args, "--namespace="+namespace)
 	if len(sel) > 0 {
-		args = append(args, "-l", strings.Join(sel, ","))
+		args = append(args, "--selector="+strings.Join(sel, ","))
 	}
 	out, err := k.run(args...)
 	if err != nil {

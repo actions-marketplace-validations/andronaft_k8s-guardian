@@ -13,6 +13,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/andronaft/k8s-guardian/internal/cluster"
+	"github.com/andronaft/k8s-guardian/internal/k8sname"
 	"github.com/andronaft/k8s-guardian/internal/manifest"
 	"github.com/andronaft/k8s-guardian/internal/quantity"
 	"github.com/andronaft/k8s-guardian/internal/rules"
@@ -170,6 +171,11 @@ func (ch *checker) apiServed(o *manifest.Object) {
 func (ch *checker) namespace(o *manifest.Object) (*cluster.Namespace, bool) {
 	name := ch.nsOf(o)
 	ns, err := ch.c.Namespace(name)
+	var invalid *k8sname.ErrInvalidName
+	if errors.As(err, &invalid) {
+		ch.add("LV002", o, "", err.Error())
+		return nil, false
+	}
 	if err != nil {
 		ch.note("namespace "+name, err)
 		return nil, false

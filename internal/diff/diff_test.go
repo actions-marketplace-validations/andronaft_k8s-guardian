@@ -1,6 +1,7 @@
 package diff
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -120,5 +121,21 @@ func TestRemovedAPIOnCluster(t *testing.T) {
 	res = Run(&cluster.Fake{GitVersion: "v1.24.0"}, f.Objects, "default", rules.NewOptions(""))
 	if fs := res.Findings(); len(fs) != 0 {
 		t.Errorf("CronJob batch/v1beta1 is still served on 1.24, got %+v", fs)
+	}
+}
+
+func TestSecretValuesAreNeverShown(t *testing.T) {
+	live, _ := manifest.Parse([]byte("apiVersion: v1\nkind: Secret\nmetadata: {name: db, namespace: prod}\ndata: {password: UHJvZFBhc3N3MHJkIQ==, user: YWRtaW4=}\n"), "cluster")
+	local, _ := manifest.Parse([]byte("apiVersion: v1\nkind: Secret\nmetadata: {name: db, namespace: prod}\ndata: {password: Y2hhbmdlbWU=, user: YWRtaW4=, token: bmV3}\n"), "s.yaml")
+	c := &cluster.Fake{Objects: map[string]*manifest.Object{"Secret/prod/db": live.Objects[0]}}
+	res := Run(c, local.Objects, "", rules.NewOptions(""))
+	b, _ := json.Marshal(res)
+	for _, leak := range []string{"UHJvZFBhc3N3MHJkIQ", "Y2hhbmdlbWU", "bmV3"} {
+		if strings.Contains(string(b), leak) {
+			t.Errorf("secret value %s leaked: %s", leak, b)
+		}
+	}
+	if len(res.Objects[0].Changes) != 2 {
+		t.Errorf("changes to password and token must still be detected: %+v", res.Objects[0].Changes)
 	}
 }

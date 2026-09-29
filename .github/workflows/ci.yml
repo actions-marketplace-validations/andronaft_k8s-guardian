@@ -60,6 +60,19 @@ jobs:
       - name: e2e tests
         run: go test -tags e2e -count=1 -v ./test/e2e/
 
+  # Known vulnerabilities in dependencies and the Go standard library.
+  govulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        env:
+          GOTOOLCHAIN: auto
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
+
   # Exercises the GitHub Action defined in action.yml.
   action:
     runs-on: ubuntu-latest

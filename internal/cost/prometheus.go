@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/andronaft/k8s-guardian/internal/cluster"
+	"github.com/andronaft/k8s-guardian/internal/k8sname"
 	"github.com/andronaft/k8s-guardian/internal/quantity"
 )
 
@@ -71,6 +72,12 @@ func (p *Prometheus) Queries(ns, podRegex string) (cpu, mem, pods string) {
 
 func (p *Prometheus) Usage(w *Workload, ns string) (map[string]cluster.Usage, int, error) {
 	name := w.target.Obj.Name()
+	if err := k8sname.ValidNamespace(ns); err != nil {
+		return nil, 0, err
+	}
+	if err := k8sname.ValidName(name); err != nil {
+		return nil, 0, err
+	}
 	cpuQ, memQ, podsQ := p.Queries(ns, PodRegex(w.Kind, name))
 	cpu, err := p.query(cpuQ)
 	if err != nil {

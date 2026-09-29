@@ -1,19 +1,20 @@
 #!/usr/bin/env bash
 # Minimal fake kubectl for exercising k8s-guardian's cluster integration.
 args="$*"
-args="${args% --context *}"
+if [ -n "$FAKE_KUBECTL_LOG" ]; then printf '%s\n' "$args" >> "$FAKE_KUBECTL_LOG"; fi
+args="${args% --context=*}"
 case "$args" in
   "version -o json") echo '{"serverVersion":{"gitVersion":"v1.29.4"}}' ;;
   "api-versions") printf 'v1\napps/v1\nbatch/v1\nautoscaling/v2\npolicy/v1\nnetworking.k8s.io/v1\n' ;;
   "config view --minify -o jsonpath={..namespace}") echo "" ;;
   "get nodes -o json") echo '{"items":[{"metadata":{"name":"node-a","labels":{"pool":"general"}},"spec":{},"status":{"allocatable":{"cpu":"3920m","memory":"15Gi"}}},{"metadata":{"name":"node-b","labels":{"pool":"general"}},"spec":{},"status":{"allocatable":{"cpu":"3920m","memory":"15Gi"}}}]}' ;;
-  "get namespace shop -o name") echo "namespace/shop" ;;
-  "get resourcequota -n shop -o json") echo '{"items":[{"metadata":{"name":"shop-compute"},"status":{"hard":{"requests.cpu":"12","requests.memory":"32Gi","pods":"30"},"used":{"requests.cpu":"3","requests.memory":"6Gi","pods":"5"}}}]}' ;;
-  "get limitrange -n shop -o json") echo '{"items":[{"metadata":{"name":"shop-limits"},"spec":{"limits":[{"type":"Container","max":{"cpu":"2","memory":"4Gi"},"defaultRequest":{"cpu":"100m","memory":"128Mi"},"default":{"memory":"256Mi"}}]}}]}' ;;
-  "get configmaps,secrets,serviceaccounts,persistentvolumeclaims -n shop -o name") printf 'configmap/kube-root-ca.crt\nserviceaccount/default\nsecret/orders-db\n' ;;
+  "get namespace/shop -o name") echo "namespace/shop" ;;
+  "get resourcequota --namespace=shop -o json") echo '{"items":[{"metadata":{"name":"shop-compute"},"status":{"hard":{"requests.cpu":"12","requests.memory":"32Gi","pods":"30"},"used":{"requests.cpu":"3","requests.memory":"6Gi","pods":"5"}}}]}' ;;
+  "get limitrange --namespace=shop -o json") echo '{"items":[{"metadata":{"name":"shop-limits"},"spec":{"limits":[{"type":"Container","max":{"cpu":"2","memory":"4Gi"},"defaultRequest":{"cpu":"100m","memory":"128Mi"},"default":{"memory":"256Mi"}}]}}]}' ;;
+  "get configmaps,secrets,serviceaccounts,persistentvolumeclaims --namespace=shop -o name") printf 'configmap/kube-root-ca.crt\nserviceaccount/default\nsecret/orders-db\n' ;;
   "get storageclasses -o json") echo '{"items":[{"metadata":{"name":"standard","annotations":{"storageclass.kubernetes.io/is-default-class":"true"}}}]}' ;;
   "get priorityclasses -o name") echo "priorityclass.scheduling.k8s.io/high" ;;
-  "get deployment.apps/orders-api -o yaml -n shop")
+  "get deployment.apps/orders-api -o yaml --namespace=shop")
     cat <<'Y'
 apiVersion: apps/v1
 kind: Deployment
@@ -44,7 +45,7 @@ status:
   replicas: 2
 Y
     ;;
-  "get service/orders-api -o yaml -n shop")
+  "get service/orders-api -o yaml --namespace=shop")
     cat <<'Y'
 apiVersion: v1
 kind: Service
@@ -56,9 +57,9 @@ spec:
   ports: [{port: 443, targetPort: 8000, protocol: TCP}]
 Y
     ;;
-  "top pods --containers --no-headers -n shop -l app=orders-api")
+  "top pods --containers --no-headers --namespace=shop --selector=app=orders-api")
     printf 'orders-api-7d9f-a   api   12m   40Mi\norders-api-7d9f-b   api   18m   56Mi\n' ;;
-  "top pods --containers --no-headers -n shop -l app=web")
+  "top pods --containers --no-headers --namespace=shop --selector=app=web")
     echo "error: Metrics API not available" >&2; exit 1 ;;
   kustomize\ *)
     # Minimal stand-in for `kubectl kustomize DIR`: concatenate the resources

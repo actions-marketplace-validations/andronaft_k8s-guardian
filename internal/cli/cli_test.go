@@ -246,3 +246,72 @@ func TestCostUsage(t *testing.T) {
 		t.Errorf("expected a metrics note, got %q", errOut)
 	}
 }
+
+// A manifest from an untrusted pull request must never be able to inject
+// kubectl flags (e.g. redirect the credentials with --server).
+func TestLiveRejectsKubectlFlagInjection(t *testing.T) {
+	fakeKubectl(t)
+	log := filepath.Join(t.TempDir(), "calls")
+	t.Setenv("FAKE_KUBECTL_LOG", log)
+	evil := filepath.Join(t.TempDir(), "evil.yaml")
+	os.WriteFile(evil, []byte(`apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: "--kubeconfig=/tmp/x"
+  namespace: "--server=https://attacker.example"
+spec:
+  selector: {matchLabels: {"--raw": "/api"}}
+  template:
+    metadata: {labels: {"--raw": "/api"}}
+    spec:
+      containers: [{name: c, image: "r.io/a:1"}]
+`), 0o600)
+	_, out, _ := run(t, "check", "-f", evil, "--live")
+	run(t, "diff", "-f", evil)
+	run(t, "cost", "-f", evil, "--usage")
+	calls, _ := os.ReadFile(log)
+	for _, bad := range []string{"attacker", "--kubeconfig", "--raw"} {
+		if strings.Contains(string(calls), bad) {
+			t.Errorf("kubectl received %q:\n%s", bad, calls)
+		}
+	}
+	if !strings.Contains(out, `LV002  invalid namespace "--server=https://attacker.example"`) {
+		t.Errorf("expected an invalid-namespace finding:\n%s", out)
+	}
+	if code, _, errOut := run(t, "audit", "deployments", "-n", "x --server=y"); code != ExitError || !strings.Contains(errOut, "invalid namespace") {
+		t.Errorf("audit accepted a malicious namespace: %d %s", code, errOut)
+	}
+}
+
+// --fix must never drop documents it does not understand.
+func TestFixKeepsNonObjectDocuments(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mixed.yaml")
+	os.WriteFile(path, []byte("# header\n---\napiVersion: v1\nkind: Pod\nmetadata: {name: p}\nspec:\n  containers: [{name: c, image: nginx}]\n---\n- a list document\n- kept as is\n---\njust a scalar\n"), 0o600)
+	run(t, "check", "-f", path, "--fix")
+	out, _ := os.ReadFile(path)
+	for _, want := range []string{"# header", "runAsNonRoot: true", "- a list document", "- kept as is", "just a scalar"} {
+		if !strings.Contains(string(out), want) {
+			t.Errorf("missing %q after --fix:\n%s", want, out)
+		}
+	}
+}
+
+// Walking a repository must not fail on unrelated YAML (templates,
+// dependencies), but a broken Kubernetes manifest must still fail.
+func TestDirectoryWalkIsTolerantButNotBlind(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "k8s"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "node_modules", "x"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "templates"), 0o755)
+	data, _ := os.ReadFile(secure)
+	os.WriteFile(filepath.Join(dir, "k8s", "app.yaml"), data, 0o600)
+	os.WriteFile(filepath.Join(dir, "node_modules", "x", "bad.yml"), []byte("key: [unclosed\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, "templates", "values.yaml"), []byte("name: {{ app }}\n  bad: [x\n"), 0o600)
+	if code, out, errOut := run(t, "check", "-f", dir); code != ExitOK || !strings.Contains(out, "no issues") {
+		t.Errorf("unrelated YAML broke the check: %d %s %s", code, out, errOut)
+	}
+	os.WriteFile(filepath.Join(dir, "k8s", "broken.yaml"), []byte("apiVersion: v1\nkind: Pod\nmetadata: {name: [x\n"), 0o600)
+	if code, _, _ := run(t, "check", "-f", dir); code != ExitError {
+		t.Errorf("a broken manifest must fail the check, got %d", code)
+	}
+}

@@ -50,9 +50,11 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
+	if len(f.files) == 0 {
+		fs.Usage()
+	}
 	files, err := loadFiles(f.files)
 	if err != nil {
-		fs.Usage()
 		return ExitError, err
 	}
 	var cl cluster.Cluster

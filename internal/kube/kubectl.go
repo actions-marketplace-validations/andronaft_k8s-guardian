@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 
+	"github.com/andronaft/k8s-guardian/internal/k8sname"
 	"github.com/andronaft/k8s-guardian/internal/manifest"
 	"github.com/andronaft/k8s-guardian/internal/yamlx"
 )
@@ -15,18 +16,28 @@ import (
 // Cluster-managed fields (status, managedFields, uid, ...) are stripped so
 // the result can be fixed and re-applied.
 func Get(args []string, namespace, kubeContext string, allNamespaces bool) (*manifest.File, error) {
+	// Resource arguments come from the command line or from MCP clients;
+	// never let them be interpreted as kubectl flags.
+	for _, a := range args {
+		if err := k8sname.ValidResourceArg(a); err != nil {
+			return nil, err
+		}
+	}
 	if _, err := exec.LookPath("kubectl"); err != nil {
 		return nil, fmt.Errorf("kubectl not found in PATH")
 	}
 	cmdArgs := append([]string{"get"}, args...)
 	if namespace != "" {
-		cmdArgs = append(cmdArgs, "-n", namespace)
+		if err := k8sname.ValidNamespace(namespace); err != nil {
+			return nil, err
+		}
+		cmdArgs = append(cmdArgs, "--namespace="+namespace)
 	}
 	if allNamespaces {
 		cmdArgs = append(cmdArgs, "--all-namespaces")
 	}
 	if kubeContext != "" {
-		cmdArgs = append(cmdArgs, "--context", kubeContext)
+		cmdArgs = append(cmdArgs, "--context="+kubeContext)
 	}
 	cmdArgs = append(cmdArgs, "-o", "yaml")
 	var stderr bytes.Buffer
@@ -45,7 +56,13 @@ func Get(args []string, namespace, kubeContext string, allNamespaces bool) (*man
 		return nil, err
 	}
 	f.Writable = false
+	// Secrets have nothing to audit but their values would be printed by
+	// --fix (and could end up in logs), so their data never leaves here.
 	for _, o := range f.Objects {
+		if o.Kind() == "Secret" {
+			yamlx.Delete(o.Root, "data")
+			yamlx.Delete(o.Root, "stringData")
+		}
 		Clean(o)
 	}
 	return f, nil

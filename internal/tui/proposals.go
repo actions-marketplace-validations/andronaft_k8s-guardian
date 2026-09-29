@@ -96,7 +96,7 @@ func Build(files []*manifest.File, opts rules.Options, withAI bool) []*Proposal 
 			if len(rest) == 0 {
 				continue
 			}
-			if withAI {
+			if withAI && o.Kind() != "Secret" { // Secrets are never sent to the API
 				out = append(out, &Proposal{Kind: AIFix, Findings: rest, File: f, Obj: o})
 				continue
 			}
@@ -224,8 +224,12 @@ func FetchAI(ctx context.Context, client *ai.Client, p *Proposal) (root *yaml.No
 	if err != nil {
 		return nil, base, "", err
 	}
-	if len(f.Objects) == 0 {
-		return nil, base, "", fmt.Errorf("no Kubernetes object in the answer from Claude")
+	if len(f.Objects) != 1 {
+		return nil, base, "", fmt.Errorf("expected exactly one Kubernetes object in the answer from Claude, got %d", len(f.Objects))
 	}
-	return f.Objects[0].Root, base, notes, nil
+	got := f.Objects[0]
+	if got.Kind() != p.Obj.Kind() || got.Name() != p.Obj.Name() || got.Namespace() != p.Obj.Namespace() {
+		return nil, base, "", fmt.Errorf("the answer from Claude describes %s, not %s; not applied", got.Ref(), p.Obj.Ref())
+	}
+	return got.Root, base, notes, nil
 }

@@ -68,6 +68,11 @@ type Condition struct {
 	Values []string `yaml:"values,omitempty" json:"values"`
 }
 
+var (
+	ruleNameRe = regexp.MustCompile(`^[a-z0-9]([-a-z0-9]*[a-z0-9])?$`)
+	ruleIDRe   = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,31}$`)
+)
+
 // Ops lists the supported operators.
 var Ops = []string{"exists", "notExists", "equals", "notEquals", "in", "notIn", "matches", "notMatches", "gt", "gte", "lt", "lte"}
 
@@ -264,8 +269,16 @@ func Compile(d Document) (*rules.Rule, error) {
 	if name == "" {
 		return nil, errors.New("metadata.name is required")
 	}
+	// The name becomes a file name (rule create) and part of Kubernetes
+	// object names (export), so it must be a plain DNS label.
+	if len(name) > 63 || !ruleNameRe.MatchString(name) {
+		return nil, fmt.Errorf("rule %q: metadata.name must be lower-case letters, digits and '-' (max 63)", name)
+	}
 	if s.ID == "" {
 		return nil, fmt.Errorf("rule %s: spec.id is required", name)
+	}
+	if !ruleIDRe.MatchString(s.ID) {
+		return nil, fmt.Errorf("rule %s: spec.id %q must be letters, digits, '-' or '_' (max 32)", name, s.ID)
 	}
 	if strings.HasPrefix(strings.ToUpper(s.ID), "KG") {
 		return nil, fmt.Errorf("rule %s: id %s is reserved for built-in rules", name, s.ID)

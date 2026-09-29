@@ -98,3 +98,18 @@ func TestCompileErrors(t *testing.T) {
 		}
 	}
 }
+
+func TestRuleNamesCannotEscapeOutputDir(t *testing.T) {
+	for _, name := range []string{"../../.github/workflows/pwn", "a/b", "Upper", "-x", "x.yaml", ""} {
+		d := Document{Metadata: Metadata{Name: name}, Spec: Spec{ID: "ORG9", Severity: "error", Assert: []Condition{{Path: "a", Op: "exists"}}}}
+		if _, err := Compile(d); err == nil {
+			t.Errorf("name %q accepted", name)
+		}
+	}
+	for _, id := range []string{"KG1", "a b", "x/y", "1abc"} {
+		d := Document{Metadata: Metadata{Name: "ok"}, Spec: Spec{ID: id, Severity: "error", Assert: []Condition{{Path: "a", Op: "exists"}}}}
+		if _, err := Compile(d); err == nil {
+			t.Errorf("id %q accepted", id)
+		}
+	}
+}

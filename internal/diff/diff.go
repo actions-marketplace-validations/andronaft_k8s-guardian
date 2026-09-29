@@ -108,6 +108,9 @@ func Run(c cluster.Cluster, objs []*manifest.Object, namespace string, opts rule
 			continue
 		}
 		walk(o.Root, live.Root, "", &d.Changes)
+		if o.Kind() == "Secret" {
+			redact(d.Changes)
+		}
 		d.Status = Changed
 		if len(d.Changes) == 0 {
 			d.Status = Unchanged
@@ -467,4 +470,21 @@ func (a *analysis) hpaFor() string {
 		}
 	}
 	return ""
+}
+
+// redact hides Secret values: diffs end up in CI logs and MCP responses, so
+// only the fact that a key changed is reported, never its old or new value.
+func redact(changes []Change) {
+	for i, c := range changes {
+		if strings.HasPrefix(c.Path, "data") || strings.HasPrefix(c.Path, "stringData") {
+			changes[i].Old, changes[i].New = redacted(c.Old), redacted(c.New)
+		}
+	}
+}
+
+func redacted(v string) string {
+	if v == "<none>" || v == "<removed>" || v == "present" {
+		return v
+	}
+	return "(redacted)"
 }

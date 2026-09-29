@@ -46,9 +46,11 @@ func (a *App) diff(args []string) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
+	if len(f.files) == 0 {
+		fs.Usage()
+	}
 	files, err := loadFiles(f.files)
 	if err != nil {
-		fs.Usage()
 		return ExitError, err
 	}
 	cl, err := cluster.NewKubectl(f.kubeContext)
@@ -150,9 +152,11 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 	if apply && !f.ai {
 		return ExitError, errors.New("--apply requires --ai")
 	}
+	if len(f.files) == 0 {
+		fs.Usage()
+	}
 	files, err := loadFiles(f.files)
 	if err != nil {
-		fs.Usage()
 		return ExitError, err
 	}
 	ws := cost.Estimate(objects(files), p)
@@ -473,7 +477,12 @@ func (a *App) ruleCreate(ctx context.Context, args []string) (int, error) {
 		if err := os.MkdirAll(out, 0o755); err != nil {
 			return ExitError, err
 		}
+		// custom.Compile only accepts DNS-label names; double-check the
+		// file stays inside the output directory anyway.
 		path := filepath.Join(out, d.Metadata.Name+".yaml")
+		if rel, err := filepath.Rel(out, path); err != nil || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) {
+			return ExitError, fmt.Errorf("refusing to write rule %q outside %s", d.Metadata.Name, out)
+		}
 		if _, err := os.Stat(path); err == nil && !force {
 			return ExitError, fmt.Errorf("%s already exists (use --force to overwrite)", path)
 		}
