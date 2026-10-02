@@ -60,6 +60,9 @@ type Finding struct {
 	Container string   `json:"container,omitempty"`
 	Line      int      `json:"line,omitempty"`
 	Fixable   bool     `json:"fixable"`
+	// UnsafeFix marks findings whose deterministic fix runs only with
+	// --unsafe-fixes because it can change how the workload behaves.
+	UnsafeFix bool `json:"unsafeFix,omitempty"`
 }
 
 // Container is a (init) container inside a pod spec.
@@ -87,10 +90,17 @@ func (c *Container) EnsureSecurityContext() *yaml.Node {
 // PodSecurityContext returns spec.securityContext of the pod (may be nil).
 func (t *Target) PodSecurityContext() *yaml.Node { return yamlx.Get(t.PodSpec, "securityContext") }
 
-// IsBatch reports whether the workload runs to completion (Job, CronJob).
+// IsBatch reports whether the workload runs to completion: a Job, a CronJob,
+// or a bare Pod that is not restarted (e.g. a Helm test hook).
 func (t *Target) IsBatch() bool {
-	k := t.Obj.Kind()
-	return k == "Job" || k == "CronJob"
+	switch t.Obj.Kind() {
+	case "Job", "CronJob":
+		return true
+	case "Pod":
+		p := yamlx.String(t.PodSpec, "restartPolicy")
+		return p == "Never" || p == "OnFailure"
+	}
+	return false
 }
 
 // Rule is a single policy.
@@ -111,6 +121,15 @@ type Rule struct {
 	// Fix applies a deterministic remediation. c is nil for pod-level rules.
 	// Rules without Fix can only be fixed with --ai.
 	Fix func(t *Target, c *Container) bool
+	// Unsafe marks a Fix that can break a working workload (a root image
+	// that can no longer start, an app that writes to its filesystem,
+	// guessed resource values). It is applied only with Options.UnsafeFixes.
+	Unsafe bool
+}
+
+// AutoFix reports whether --fix applies the rule's fix under opts.
+func (r *Rule) AutoFix(opts Options) bool {
+	return r.Fix != nil && (!r.Unsafe || opts.UnsafeFixes)
 }
 
 // podSpecPaths maps workload kinds to the path of their pod spec.

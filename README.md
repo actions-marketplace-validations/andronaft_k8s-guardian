@@ -23,7 +23,7 @@ Most Kubernetes linters are static: they read a YAML file and print an error. `k
 | | Feature | Command |
 |---|---|---|
 | 🔍 | **17 built-in guardrails**: requests/limits, non-root, privilege escalation, capabilities, probes, `:latest`, host namespaces, seccomp, Service→Pod port wiring, removed APIs | `check -f` |
-| 🔧 | **Deterministic auto-fix**: idempotent and comment-preserving | `check --fix` |
+| 🔧 | **Deterministic auto-fix**: safe fixes by default, riskier ones opt-in; idempotent, and documents it doesn't change stay byte for byte | `check --fix [--unsafe-fixes]` |
 | 🤖 | **AI auto-fix**: Claude fixes probes, image pinning and custom-rule violations, and leaves `TODO` comments instead of guessing | `check --fix --ai` |
 | 🖥️ | **Interactive review TUI**: finding on the left, colored diff on the right, `[y]` accept `[n]` skip `[e]` edit | `interactive -f` |
 | 🌐 | **Live cluster context**: ResourceQuota headroom, node capacity with nodeSelector, LimitRanges, missing ConfigMaps/Secrets/SAs/PVCs, CRDs, StorageClasses | `check --live` |
@@ -62,21 +62,26 @@ kubectl krew install --manifest-url=https://raw.githubusercontent.com/andronaft/
 ```bash
 k8s-guardian check -f k8s/                      # files, directories, Helm charts, stdin (-f -)
 k8s-guardian check -k overlays/prod             # Kustomize overlays (also: -f on a kustomization dir)
-k8s-guardian check -f deploy.yaml --fix         # deterministic fixes, in place, comments kept
+k8s-guardian check -f deploy.yaml --fix         # safe deterministic fixes, in place, comments kept
+k8s-guardian check -f deploy.yaml --fix --unsafe-fixes  # + fixes that can change how the app runs
 k8s-guardian check -f deploy.yaml --fix --ai    # + Claude for the rest (needs ANTHROPIC_API_KEY)
 ```
 
 ```text
 examples/insecure-deployment.yaml  Deployment/web
-  ✖ error   KG011  hostNetwork enabled [fixable]
-  ✖ error   KG001  container "nginx": missing resources.requests (cpu, memory) [fixable] (line 19)
-  ✖ error   KG004  container "nginx": securityContext.privileged is true [fixable] (line 19)
-  ⚠ warning KG008  container "nginx": missing livenessProbe (line 19)
+  ✖ error   KG011  hostNetwork enabled (line 17)
+  ⚠ warning KG013  securityContext.seccompProfile is not set to RuntimeDefault or Localhost [fixable] (line 17)
+  ✖ error   KG001  container "nginx": missing resources.requests (cpu, memory) [unsafe fix] (line 19)
+  ✖ error   KG003  container "nginx": securityContext.runAsNonRoot is not true [unsafe fix] (line 19)
+  ✖ error   KG004  container "nginx": securityContext.privileged is true (line 19)
   ✖ error   KG010  container "nginx": image "nginx:latest" uses the mutable :latest tag (line 19)
   ...
-6 error(s), 6 warning(s), 2 info
-9 issue(s) can be fixed automatically with --fix (add --ai to let Claude fix the rest)
+6 error(s), 4 warning(s), 2 info
+1 issue(s) can be fixed automatically with --fix (add --ai to let Claude fix the rest)
+4 more with --fix --unsafe-fixes: these can change how the workload runs (root images, writable filesystems, resources), so review them
 ```
+
+`--fix` only applies fixes that can't break a working workload (`allowPrivilegeEscalation: false`, `seccompProfile: RuntimeDefault`). `runAsNonRoot`, `readOnlyRootFilesystem`, `drop: [ALL]` and default resources are the right target, but they stop root images, apps that write to their filesystem and memory-hungry apps from running, so they need `--unsafe-fixes` and a review. Privileged containers and host namespaces are never changed automatically: node agents need them on purpose.
 
 ### 2. Review fixes interactively
 
@@ -240,25 +245,31 @@ Exportable built-ins: KG001–KG007, KG010–KG012. Rules that need cross-resour
 
 | ID | Name | Severity | Fix |
 |----|------|----------|-----|
-| KG001 | `resource-requests`: CPU and memory requests set | error | auto |
-| KG002 | `memory-limit`: memory limit set | error | auto |
-| KG003 | `run-as-non-root` | error | auto |
-| KG004 | `no-privileged` | error | auto |
-| KG005 | `no-privilege-escalation` | warning | auto |
-| KG006 | `read-only-root-filesystem` | warning | auto |
-| KG007 | `drop-all-capabilities` | warning | auto |
-| KG008 | `liveness-probe` (not for Jobs, CronJobs, init containers) | warning | AI |
-| KG009 | `readiness-probe` (not for Jobs, CronJobs, init containers) | warning | AI |
+| KG001 | `resource-requests`: CPU and memory requests set | error | auto* |
+| KG002 | `memory-limit`: memory limit set | error | auto* |
+| KG003 | `run-as-non-root` | error | auto* |
+| KG004 | `no-privileged` | error | AI |
+| KG005 | `no-privilege-escalation` (not for privileged containers) | warning | auto |
+| KG006 | `read-only-root-filesystem` | warning | auto* |
+| KG007 | `drop-all-capabilities` (not for privileged containers) | warning | auto* |
+| KG008 | `liveness-probe` (not for Jobs, CronJobs, run-once Pods, init containers) | warning | AI |
+| KG009 | `readiness-probe` (not for Jobs, CronJobs, run-once Pods, init containers) | warning | AI |
 | KG010 | `pinned-image-tag`: no `:latest` or untagged images | error | AI |
-| KG011 | `no-host-namespaces` | error | auto |
+| KG011 | `no-host-namespaces` | error | AI |
 | KG012 | `no-host-path` | warning | AI |
 | KG013 | `seccomp-profile` | warning | auto |
 | KG014 | `automount-service-account-token` | info | AI |
 | KG015 | `high-availability`: at least 2 replicas | info | AI |
-| KG016 | `service-target-port`: Service selector matches a workload and targetPort matches its containerPort | warning | AI |
+| KG016 | `service-target-port`: Service selector is a near miss of a workload, or targetPort matches no declared containerPort | warning | AI |
 | KG017 | `removed-api-version`: e.g. `extensions/v1beta1`, `batch/v1beta1` CronJob, `autoscaling/v2beta2` | error | AI |
 
+auto: `--fix`. auto*: `--fix --unsafe-fixes` (review the result). AI: only `--fix --ai` or a manual edit. Privileged containers (KG004) and host namespaces (KG011) are usually deliberate in node agents, so `--fix` reports them but never changes them.
+
 To ignore rules for one resource, add `k8s-guardian.io/ignore: "KG011,no-host-path"` to its annotations. To skip them globally, use `--skip`. `k8s-guardian rules` lists every rule, including custom, live and diff rules.
+
+## 🧪 Tested on real charts
+
+k8s-guardian was run against 30 popular Helm charts (ingress-nginx, kube-prometheus-stack, Argo CD, cert-manager, Vault, Longhorn, ...; 652 objects). The run found five bugs in k8s-guardian, including a `--fix` that broke privileged node agents, and all of them are fixed. Results, the bugs and how to reproduce the run: [docs/real-world-test.md](docs/real-world-test.md).
 
 ## 🔌 kubectl plugin
 

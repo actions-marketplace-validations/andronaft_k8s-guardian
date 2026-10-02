@@ -145,6 +145,7 @@ type flags struct {
 	files, rulePaths, kustomize     multi
 	format, failOn, skip, model     string
 	fix, ai, stdout, live, interact bool
+	unsafeFixes                     bool
 	namespace, kubeContext          string
 	allNamespaces                   bool
 }
@@ -192,6 +193,7 @@ func (f *flags) cluster(fs *flag.FlagSet) {
 // options builds rule options including custom rules.
 func (f *flags) options() (rules.Options, error) {
 	opts := rules.NewOptions(f.skip)
+	opts.UnsafeFixes = f.unsafeFixes
 	paths := []string{custom.DefaultDir}
 	if env := os.Getenv("K8S_GUARDIAN_RULES"); env != "" {
 		paths = append(paths, filepath.SplitList(env)...)
@@ -274,6 +276,9 @@ func (a *App) listRules(args []string) error {
 				fix = "ai"
 				if r.Fix != nil {
 					fix = "auto"
+					if r.Unsafe {
+						fix = "auto*"
+					}
 				}
 			}
 			fmt.Fprintf(a.Stdout, "  %-7s %-32s %-8s %-5s %s\n", r.ID, r.Name, r.Severity, fix, r.Description)
@@ -283,6 +288,7 @@ func (a *App) listRules(args []string) error {
 	section("Built-in rules (check):", rules.All, true)
 	section("Custom rules ("+custom.DefaultDir+", --rules):", opts.Custom, true)
 	section("Live cluster rules (check --live):", live.Rules, false)
+	fmt.Fprintln(a.Stdout, "\nauto* = fixed only with --fix --unsafe-fixes: the fix can change how the workload runs, review it.")
 	section("Change rules (diff):", diff.Rules, false)
 	fmt.Fprintf(a.Stdout, "\nSkip rules per resource with the annotation %s: \"KG006,liveness-probe\"\n", rules.IgnoreAnnotation)
 	return nil

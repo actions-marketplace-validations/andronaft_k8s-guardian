@@ -75,9 +75,9 @@ func TestAIFixCannotIntroduceNewErrors(t *testing.T) {
 	fakeClaude(t, "apiVersion: v1\nkind: Pod\nmetadata: {name: a}\nspec:\n  hostNetwork: true\n  containers: [{name: c, image: nginx:latest}]\n---\napiVersion: v1\nkind: Service\nmetadata: {name: svc}\nspec: {ports: [{port: 80}]}\n")
 	f, _ := manifest.Parse([]byte(twoObjects), "app.yaml")
 	_, err := Fix(context.Background(), f, FixOptions{Rules: rules.NewOptions(""), AI: true, AIMinSeverity: rules.Info})
-	// hostNetwork (KG011) is removed again by the deterministic fix, but the
-	// mutable :latest tag (KG010) can't be auto-fixed and must be rejected.
-	if err == nil || !strings.Contains(err.Error(), "introduced a new problem (KG010") {
+	// Neither hostNetwork (KG011) nor the mutable :latest tag (KG010) is
+	// auto-fixable, so the answer must be rejected.
+	if err == nil || !strings.Contains(err.Error(), "introduced a new problem (KG01") {
 		t.Fatalf("expected the injected :latest image to be rejected, got %v", err)
 	}
 }

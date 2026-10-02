@@ -34,6 +34,7 @@ var All = []*Rule{
 			}
 			return fmt.Sprintf("missing resources.requests (%s)", strings.Join(missing, ", "))
 		},
+		Unsafe: true, // guessed values
 		Fix: func(t *Target, c *Container) bool {
 			req := yamlx.EnsureMap(yamlx.EnsureMap(c.Node, "resources"), "requests")
 			changed := false
@@ -57,6 +58,7 @@ var All = []*Rule{
 			}
 			return ""
 		},
+		Unsafe: true, // a guessed limit can OOM-kill the app
 		Fix: func(t *Target, c *Container) bool {
 			res := yamlx.EnsureMap(c.Node, "resources")
 			limit := DefaultMemoryLimit
@@ -76,6 +78,7 @@ var All = []*Rule{
 			}
 			return "securityContext.runAsNonRoot is not true"
 		},
+		Unsafe: true, // root images fail to start
 		Fix: func(t *Target, c *Container) bool {
 			sc := c.EnsureSecurityContext()
 			yamlx.Set(sc, "runAsNonRoot", yamlx.Bool(true))
@@ -89,21 +92,22 @@ var All = []*Rule{
 		ID: "KG004", Name: "no-privileged", Severity: Error,
 		Description: "Privileged containers have full access to the host.",
 		Container: func(t *Target, c *Container) string {
-			if yamlx.IsTrue(yamlx.Get(c.SecurityContext(), "privileged")) {
+			if isPrivileged(c) {
 				return "securityContext.privileged is true"
 			}
 			return ""
 		},
-		Fix: func(t *Target, c *Container) bool {
-			yamlx.Set(c.EnsureSecurityContext(), "privileged", yamlx.Bool(false))
-			return true
-		},
+		// No auto-fix: privileged agents (CNI, CSI, node monitoring) need it,
+		// and turning it off breaks them. Remove it by hand or ignore the
+		// rule for that resource.
 	},
 	{
 		ID: "KG005", Name: "no-privilege-escalation", Severity: Warning,
 		Description: "Set securityContext.allowPrivilegeEscalation: false to block setuid binaries from gaining privileges.",
 		Container: func(t *Target, c *Container) string {
-			if yamlx.IsFalse(yamlx.Get(c.SecurityContext(), "allowPrivilegeEscalation")) {
+			// Privileged containers can always escalate (KG004 reports them),
+			// and the API rejects allowPrivilegeEscalation: false for them.
+			if isPrivileged(c) || yamlx.IsFalse(yamlx.Get(c.SecurityContext(), "allowPrivilegeEscalation")) {
 				return ""
 			}
 			return "securityContext.allowPrivilegeEscalation is not false"
@@ -122,6 +126,7 @@ var All = []*Rule{
 			}
 			return "securityContext.readOnlyRootFilesystem is not true"
 		},
+		Unsafe: true, // apps that write to their filesystem fail
 		Fix: func(t *Target, c *Container) bool {
 			yamlx.Set(c.EnsureSecurityContext(), "readOnlyRootFilesystem", yamlx.Bool(true))
 			return true
@@ -131,6 +136,9 @@ var All = []*Rule{
 		ID: "KG007", Name: "drop-all-capabilities", Severity: Warning,
 		Description: "Drop all Linux capabilities (securityContext.capabilities.drop: [ALL]) and add back only what is needed.",
 		Container: func(t *Target, c *Container) string {
+			if isPrivileged(c) {
+				return "" // privileged containers have every capability (KG004)
+			}
 			drop := yamlx.Path(c.SecurityContext(), "capabilities", "drop")
 			if drop != nil && drop.Kind == yaml.SequenceNode {
 				for _, d := range drop.Content {
@@ -141,6 +149,7 @@ var All = []*Rule{
 			}
 			return "securityContext.capabilities.drop does not include ALL"
 		},
+		Unsafe: true, // apps may need a capability (NET_BIND_SERVICE, ...)
 		Fix: func(t *Target, c *Container) bool {
 			caps := yamlx.EnsureMap(c.EnsureSecurityContext(), "capabilities")
 			drop := yamlx.Get(caps, "drop")
@@ -211,15 +220,7 @@ var All = []*Rule{
 			}
 			return strings.Join(on, ", ") + " enabled"
 		},
-		Fix: func(t *Target, _ *Container) bool {
-			changed := false
-			for _, k := range []string{"hostNetwork", "hostPID", "hostIPC"} {
-				if yamlx.IsTrue(yamlx.Get(t.PodSpec, k)) {
-					changed = yamlx.Delete(t.PodSpec, k) || changed
-				}
-			}
-			return changed
-		},
+		// No auto-fix: node agents use host namespaces on purpose.
 	},
 	{
 		ID: "KG012", Name: "no-host-path", Severity: Warning,
@@ -292,6 +293,10 @@ var All = []*Rule{
 			return ""
 		},
 	},
+}
+
+func isPrivileged(c *Container) bool {
+	return yamlx.IsTrue(yamlx.Get(c.SecurityContext(), "privileged"))
 }
 
 func runsAsNonRoot(t *Target, c *Container) bool {

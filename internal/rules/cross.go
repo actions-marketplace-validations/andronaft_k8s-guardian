@@ -103,6 +103,20 @@ func labelsMatch(selector, labels *yaml.Node) bool {
 	return true
 }
 
+// labelsOverlap reports whether labels carry at least one of the selector's
+// key=value pairs.
+func labelsOverlap(selector, labels *yaml.Node) bool {
+	if labels == nil {
+		return false
+	}
+	for i := 0; i+1 < len(selector.Content); i += 2 {
+		if yamlx.String(labels, selector.Content[i].Value) == selector.Content[i+1].Value {
+			return true
+		}
+	}
+	return false
+}
+
 func formatSelector(sel *yaml.Node) string {
 	var kv []string
 	for i := 0; i+1 < len(sel.Content); i += 2 {
@@ -116,7 +130,7 @@ func init() {
 	All = append(All,
 		&Rule{
 			ID: "KG016", Name: "service-target-port", Severity: Warning,
-			Description: "A Service's selector must match a workload in the same manifest set, and its targetPort must match a containerPort of that workload.",
+			Description: "A Service must select the workload it was written for (no near-miss selector labels), and its targetPort must match a declared containerPort.",
 			Resource: func(o *manifest.Object, all []*manifest.Object) []string {
 				if o.Kind() != "Service" {
 					return nil
@@ -125,21 +139,25 @@ func init() {
 				if sel == nil || sel.Kind != yaml.MappingNode || len(sel.Content) == 0 {
 					return nil
 				}
-				var matched []*Target
-				workloads := 0
+				var matched, near []*Target
 				for _, w := range all {
 					t := NewTarget(w)
 					if t == nil || w.Namespace() != o.Namespace() {
 						continue
 					}
-					workloads++
-					if labelsMatch(sel, PodTemplateLabels(w)) {
+					labels := PodTemplateLabels(w)
+					if labelsMatch(sel, labels) {
 						matched = append(matched, t)
+					} else if labelsOverlap(sel, labels) {
+						near = append(near, t)
 					}
 				}
 				if len(matched) == 0 {
-					if workloads > 0 {
-						return []string{fmt.Sprintf("selector %s matches none of the %d workload(s) in the same namespace of this manifest set", formatSelector(sel), workloads)}
+					// Pods are often created outside the manifest set (operators,
+					// controllers), so only a near miss is reported: a workload that
+					// carries some, but not all, of the selector's labels.
+					if len(near) > 0 {
+						return []string{fmt.Sprintf("selector %s matches no workload; %s carries only some of these labels", formatSelector(sel), refs(near))}
 					}
 					return nil
 				}
@@ -161,7 +179,9 @@ func init() {
 						target = yamlx.String(p, "port")
 					}
 					if _, err := strconv.Atoi(target); err == nil {
-						if !numbers[target] {
+						// containerPort is informational: a numeric targetPort works
+						// without it, so only flag it when ports are declared at all.
+						if len(numbers) > 0 && !numbers[target] {
 							out = append(out, fmt.Sprintf("targetPort %s does not match any containerPort of %s", target, refs(matched)))
 						}
 					} else if !names[target] {

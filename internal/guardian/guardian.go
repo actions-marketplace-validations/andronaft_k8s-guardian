@@ -86,7 +86,7 @@ func Fix(ctx context.Context, f *manifest.File, opts FixOptions) (*FixResult, er
 	}
 	fixable := map[string]bool{}
 	for _, r := range opts.Rules.Rules() {
-		fixable[r.ID] = r.Fix != nil
+		fixable[r.ID] = r.AutoFix(opts.Rules)
 	}
 	for _, fd := range rules.Validate(nf.Objects, opts.Rules) {
 		// Auto-fixable regressions are repaired right below.

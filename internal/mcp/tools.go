@@ -24,6 +24,7 @@ type toolArgs struct {
 	YAML      string `json:"yaml"`
 	Skip      string `json:"skip"`
 	UseAI     bool   `json:"use_ai"`
+	Unsafe    bool   `json:"unsafe_fixes"`
 	Resource  string `json:"resource"`
 	Namespace string `json:"namespace"`
 	Rule      string `json:"rule"`
@@ -125,6 +126,9 @@ func (s *Server) callTool(ctx context.Context, name string, raw json.RawMessage)
 			fix := "manual/AI"
 			if r.Fix != nil {
 				fix = "auto"
+				if r.Unsafe {
+					fix = "unsafe"
+				}
 			}
 			fmt.Fprintf(&b, "%-7s %-32s %-7s fix:%-9s %s\n", r.ID, r.Name, r.Severity, fix, r.Description)
 		}

@@ -1,6 +1,7 @@
 package rules_test
 
 import (
+	"fmt"
 	"os"
 	"strings"
 	"testing"
@@ -40,16 +41,21 @@ func TestSecureManifestPasses(t *testing.T) {
 func TestInsecureManifestFindings(t *testing.T) {
 	f := load(t, "../../examples/insecure-deployment.yaml")
 	got := ids(rules.Validate(f.Objects, rules.NewOptions("")))
-	for _, id := range []string{"KG001", "KG002", "KG003", "KG004", "KG005", "KG006", "KG007", "KG008", "KG009", "KG010", "KG011", "KG013", "KG014", "KG015"} {
+	for _, id := range []string{"KG001", "KG002", "KG003", "KG004", "KG006", "KG008", "KG009", "KG010", "KG011", "KG013", "KG014", "KG015"} {
 		if got[id] == 0 {
 			t.Errorf("expected finding %s", id)
 		}
+	}
+	// The container is privileged: KG004 covers escalation and capabilities.
+	if got["KG005"]+got["KG007"] != 0 {
+		t.Errorf("KG005/KG007 reported for a privileged container: %v", got)
 	}
 }
 
 func TestFixIsIdempotentAndKeepsComments(t *testing.T) {
 	f := load(t, "../../examples/insecure-deployment.yaml")
 	opts := rules.NewOptions("")
+	opts.UnsafeFixes = true
 	if n := rules.Fix(f.Objects, opts); n == 0 {
 		t.Fatal("expected fixes")
 	}
@@ -65,13 +71,43 @@ func TestFixIsIdempotentAndKeepsComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"# TODO pin me", "# Example:", "kind: Service", "memory: 128Mi", "type: RuntimeDefault", "- ALL"} {
+	for _, want := range []string{"# TODO pin me", "# Example:", "kind: Service", "memory: 128Mi", "type: RuntimeDefault", "runAsNonRoot: true",
+		// Deliberate host access is reported, never silently removed.
+		"hostNetwork: true", "privileged: true"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("fixed output missing %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(string(out), "hostNetwork") {
-		t.Error("hostNetwork should have been removed")
+}
+
+func TestOnlySafeFixesByDefault(t *testing.T) {
+	const pod = `apiVersion: v1
+kind: Pod
+metadata: {name: p}
+spec:
+  containers: [{name: c, image: nginx:1.27}]
+`
+	f, err := manifest.Parse([]byte(pod), "p.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	opts := rules.NewOptions("")
+	for _, fd := range rules.Validate(f.Objects, opts) {
+		switch fd.RuleID {
+		case "KG001", "KG002", "KG003", "KG006", "KG007":
+			if fd.Fixable || !fd.UnsafeFix {
+				t.Errorf("%s should need --unsafe-fixes: %+v", fd.RuleID, fd)
+			}
+		case "KG005", "KG013":
+			if !fd.Fixable || fd.UnsafeFix {
+				t.Errorf("%s should be a safe fix: %+v", fd.RuleID, fd)
+			}
+		}
+	}
+	rules.Fix(f.Objects, opts)
+	out, _ := f.Encode()
+	if !strings.Contains(string(out), "allowPrivilegeEscalation: false") || strings.Contains(string(out), "runAsNonRoot") || strings.Contains(string(out), "resources") {
+		t.Errorf("default --fix applied more than the safe fixes:\n%s", out)
 	}
 }
 
@@ -158,5 +194,85 @@ items:
 	}
 	if got["KG008"] != 0 || got["KG009"] != 0 {
 		t.Errorf("probes must not be required for batch workloads: %v", got)
+	}
+}
+
+func validateDoc(t *testing.T, doc string) []rules.Finding {
+	t.Helper()
+	f, err := manifest.Parse([]byte(doc), "x.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return rules.Validate(f.Objects, rules.NewOptions(""))
+}
+
+func messages(fs []rules.Finding, id string) []string {
+	var out []string
+	for _, f := range fs {
+		if f.RuleID == id {
+			out = append(out, f.Message)
+		}
+	}
+	return out
+}
+
+// Regressions found by running against popular public Helm charts.
+func TestServiceTargetPort(t *testing.T) {
+	const web = `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web}
+spec:
+  selector: {matchLabels: {app: web}}
+  template:
+    metadata: {labels: {app: web, tier: frontend}}
+    spec:
+      containers:
+        - name: web
+          image: nginx:1.27
+%s
+---
+apiVersion: v1
+kind: Service
+metadata: {name: web}
+spec:
+  selector: %s
+  ports: [%s]
+`
+	cases := []struct {
+		name, ports, selector, svcPorts string
+		want                            string
+	}{
+		{"numeric target without declared ports works", "", "{app: web}", "{port: 5432}", ""},
+		{"numeric target missing from declared ports", "          ports: [{containerPort: 8080}]", "{app: web}", "{port: 80, targetPort: 9090}", "targetPort 9090"},
+		{"named target missing", "          ports: [{name: http, containerPort: 8080}]", "{app: web}", "{port: 80, targetPort: metrics}", `targetPort "metrics"`},
+		{"declared numeric target", "          ports: [{containerPort: 8080}]", "{app: web}", "{port: 80, targetPort: 8080}", ""},
+		{"pods created by an operator", "", "{app.kubernetes.io/name: alertmanager}", "{port: 9093}", ""},
+		{"near-miss selector", "", "{app: web, tier: backend}", "{port: 80}", "carries only some"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := strings.Join(messages(validateDoc(t, fmt.Sprintf(web, c.ports, c.selector, c.svcPorts)), "KG016"), "; ")
+			if c.want == "" && got != "" || !strings.Contains(got, c.want) {
+				t.Errorf("KG016 = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestOneShotPodsNeedNoProbes(t *testing.T) {
+	const pod = `apiVersion: v1
+kind: Pod
+metadata:
+  name: chart-test
+  annotations: {helm.sh/hook: test}
+spec:
+  %s
+  containers: [{name: t, image: busybox:1.36}]
+`
+	if got := ids(validateDoc(t, fmt.Sprintf(pod, "restartPolicy: Never"))); got["KG008"]+got["KG009"] != 0 {
+		t.Errorf("probes required on a one-shot pod: %v", got)
+	}
+	if got := ids(validateDoc(t, fmt.Sprintf(pod, "restartPolicy: Always"))); got["KG008"] == 0 || got["KG009"] == 0 {
+		t.Errorf("probes not required on a long-running pod: %v", got)
 	}
 }

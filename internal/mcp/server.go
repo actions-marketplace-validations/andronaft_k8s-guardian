@@ -147,11 +147,12 @@ var baseTools = []map[string]any{
 	},
 	{
 		"name":        "fix_manifest",
-		"description": "Auto-fix Kubernetes YAML. Applies deterministic fixes (resources, securityContext, seccomp, host namespaces) preserving comments; with use_ai=true Claude also fixes the rest (probes, image tags). Returns the fixed YAML and remaining findings.",
+		"description": "Auto-fix Kubernetes YAML. Applies safe deterministic fixes (allowPrivilegeEscalation, seccomp) preserving comments; unsafe_fixes=true also sets runAsNonRoot, readOnlyRootFilesystem, drop ALL capabilities and default resources, which can break a working app; with use_ai=true Claude also fixes the rest (probes, image tags). Returns the fixed YAML and remaining findings.",
 		"inputSchema": schema(map[string]any{
-			"yaml":   map[string]string{"type": "string", "description": "Kubernetes manifest YAML"},
-			"use_ai": map[string]string{"type": "boolean", "description": "Also use Claude to fix findings without a deterministic fix (requires ANTHROPIC_API_KEY for the server)"},
-			"skip":   map[string]string{"type": "string", "description": "Optional comma separated rule IDs/names to skip"},
+			"yaml":         map[string]string{"type": "string", "description": "Kubernetes manifest YAML"},
+			"use_ai":       map[string]string{"type": "boolean", "description": "Also use Claude to fix findings without a deterministic fix (requires ANTHROPIC_API_KEY for the server)"},
+			"unsafe_fixes": map[string]string{"type": "boolean", "description": "Also apply fixes that can change runtime behaviour; tell the user to review them"},
+			"skip":         map[string]string{"type": "string", "description": "Optional comma separated rule IDs/names to skip"},
 		}, "yaml"),
 	},
 	{
@@ -186,6 +187,7 @@ func (s *Server) callBaseTool(ctx context.Context, name string, args toolArgs) (
 		if err != nil {
 			return err.Error(), true
 		}
+		opts.UnsafeFixes = args.Unsafe
 		res, err := guardian.Fix(ctx, f, guardian.FixOptions{Rules: opts, AI: args.UseAI, AIMinSeverity: rules.Warning})
 		if err != nil {
 			return err.Error(), true
