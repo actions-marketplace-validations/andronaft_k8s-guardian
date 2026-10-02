@@ -61,7 +61,7 @@ def clear():
 
 emit("\x1b[1;36m# 🛡️  k8s-guardian: Kubernetes guardrails that know your cluster\x1b[0m\r\n", 0.2)
 run("k8s-guardian check -f deploy.yaml", 3.0)
-run("k8s-guardian check -f deploy.yaml --fix 2>&1 | tail -4", 2.2)
+run("k8s-guardian check -f deploy.yaml --fix 2>&1 | tail -5", 3.0)
 clear()
 run("k8s-guardian check -f app.yaml --live --skip KG003,KG005,KG006,KG007,KG008,KG009,KG013,KG014,KG016", 3.2)
 clear()
