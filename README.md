@@ -33,7 +33,7 @@ Most Kubernetes linters are static: they read a YAML file and print an error. `k
 | 🚦 | **Enforce in the cluster**: built-in and custom rules exported as native ValidatingAdmissionPolicies or Kyverno ClusterPolicies, with the same decisions as the CLI (tested against a real API server and the Kyverno CLI) | `export vap\|kyverno` |
 | 🔌 | **kubectl plugin** | `kubectl guard …` |
 | 🧠 | **MCP server** for Claude Code / Cursor: validate, fix, live-check, diff, cost, custom rules | `mcp` |
-| ⚡ | **GitHub Action & CI**: inline PR annotations, job summary, SARIF, exit codes, pre-commit hooks | `uses: andronaft/k8s-guardian@v0.4.0` |
+| ⚡ | **GitHub Action & CI**: inline PR annotations, job summary, SARIF, exit codes, pre-commit hooks | `uses: andronaft/k8s-guardian@v0.5.0` |
 
 ---
 
@@ -327,7 +327,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: andronaft/k8s-guardian@v0.4.0
+      - uses: andronaft/k8s-guardian@v0.5.0
         with:
           path: k8s/ charts/my-app     # files, directories or Helm charts
           fail-on: error               # error | warning | info
@@ -358,7 +358,7 @@ permissions:
   security-events: write
 steps:
   - uses: actions/checkout@v7
-  - uses: andronaft/k8s-guardian@v0.4.0
+  - uses: andronaft/k8s-guardian@v0.5.0
     with:
       path: k8s/
       sarif-file: k8s-guardian.sarif
@@ -371,7 +371,7 @@ steps:
 With cluster credentials in the job, you can block breaking changes before deploying:
 
 ```yaml
-  - uses: andronaft/k8s-guardian@v0.4.0        # also puts k8s-guardian on PATH
+  - uses: andronaft/k8s-guardian@v0.5.0        # also puts k8s-guardian on PATH
     with: {path: k8s/, live: "true", namespace: prod}
   - run: k8s-guardian diff -f k8s/ -n prod --format github
 ```
@@ -383,7 +383,7 @@ Outside GitHub, use `--format github|markdown|sarif|json` in any CI. There is al
 # .pre-commit-config.yaml
 repos:
   - repo: https://github.com/andronaft/k8s-guardian
-    rev: v0.4.0
+    rev: v0.5.0
     hooks:
       - id: k8s-guardian        # or k8s-guardian-fix
         files: ^k8s/.*\.ya?ml$
