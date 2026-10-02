@@ -17,6 +17,7 @@ type Summary struct {
 	Warnings int `json:"warnings"`
 	Infos    int `json:"infos"`
 	Fixable  int `json:"fixable"`
+	Unsafe   int `json:"unsafeFixable,omitempty"`
 	Fixed    int `json:"fixed,omitempty"`
 }
 
@@ -34,6 +35,9 @@ func Summarize(fs []rules.Finding) Summary {
 		}
 		if f.Fixable {
 			s.Fixable++
+		}
+		if f.UnsafeFix {
+			s.Unsafe++
 		}
 	}
 	return s
@@ -128,6 +132,8 @@ func writeText(w io.Writer, fs []rules.Finding, s Summary, fixMode bool) {
 		extra := ""
 		if f.Fixable {
 			extra = paint("32", " [fixable]")
+		} else if f.UnsafeFix {
+			extra = paint("33", " [unsafe fix]")
 		}
 		if f.Line > 0 {
 			extra += paint("2", fmt.Sprintf(" (line %d)", f.Line))
@@ -142,6 +148,9 @@ func writeText(w io.Writer, fs []rules.Finding, s Summary, fixMode bool) {
 	fmt.Fprintln(w, msg)
 	if !fixMode && s.Fixable > 0 {
 		fmt.Fprintf(w, "%d issue(s) can be fixed automatically with --fix (add --ai to let Claude fix the rest)\n", s.Fixable)
+	}
+	if s.Unsafe > 0 {
+		fmt.Fprintf(w, "%d more with --fix --unsafe-fixes: these can change how the workload runs (root images, writable filesystems, resources), so review them\n", s.Unsafe)
 	}
 }
 

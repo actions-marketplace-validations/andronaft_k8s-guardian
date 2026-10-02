@@ -15,6 +15,8 @@ const IgnoreAnnotation = "k8s-guardian.io/ignore"
 type Options struct {
 	Skip   map[string]bool // rule IDs/names (lower-case)
 	Custom []*Rule         // user-defined rules, run after the built-ins
+	// UnsafeFixes also applies fixes that can change runtime behaviour.
+	UnsafeFixes bool
 }
 
 // Rules returns the built-in rules followed by custom rules.
@@ -66,13 +68,13 @@ func Validate(objs []*manifest.Object, opts Options) []Finding {
 			}
 			if r.Pod != nil {
 				if msg := r.Pod(t); msg != "" {
-					out = append(out, newFinding(r, t, nil, msg))
+					out = append(out, newFinding(r, t, nil, msg, opts))
 				}
 			}
 			if r.Container != nil {
 				for _, c := range t.Containers {
 					if msg := r.Container(t, c); msg != "" {
-						out = append(out, newFinding(r, t, c, msg))
+						out = append(out, newFinding(r, t, c, msg, opts))
 					}
 				}
 			}
@@ -87,8 +89,8 @@ func Validate(objs []*manifest.Object, opts Options) []Finding {
 	return out
 }
 
-// Fix applies every deterministic fix for violated, enabled rules and
-// returns the number of changes made.
+// Fix applies the deterministic fixes for violated, enabled rules (unsafe
+// ones only with opts.UnsafeFixes) and returns the number of changes made.
 func Fix(objs []*manifest.Object, opts Options) int {
 	n := 0
 	for _, o := range objs {
@@ -97,7 +99,7 @@ func Fix(objs []*manifest.Object, opts Options) int {
 			continue
 		}
 		for _, r := range opts.Rules() {
-			if r.Fix == nil || !opts.Enabled(r, o) {
+			if !r.AutoFix(opts) || !opts.Enabled(r, o) {
 				continue
 			}
 			if r.Pod != nil && r.Pod(t) != "" && r.Fix(t, nil) {
@@ -115,7 +117,7 @@ func Fix(objs []*manifest.Object, opts Options) int {
 	return n
 }
 
-func newFinding(r *Rule, t *Target, c *Container, msg string) Finding {
+func newFinding(r *Rule, t *Target, c *Container, msg string, opts Options) Finding {
 	f := Finding{
 		RuleID:    r.ID,
 		Rule:      r.Name,
@@ -125,7 +127,8 @@ func newFinding(r *Rule, t *Target, c *Container, msg string) Finding {
 		Resource:  t.Obj.Ref(),
 		Namespace: t.Obj.Namespace(),
 		Line:      t.PodSpec.Line,
-		Fixable:   r.Fix != nil,
+		Fixable:   r.AutoFix(opts),
+		UnsafeFix: r.Fix != nil && !r.AutoFix(opts),
 	}
 	if c != nil {
 		f.Container = c.Name

@@ -67,6 +67,9 @@ func (p *Proposal) Title() string {
 	if f.Container != "" {
 		t = fmt.Sprintf("%s [%s] %s", f.RuleID, f.Container, f.Message)
 	}
+	if p.Kind == RuleFix && p.rule != nil && p.rule.Unsafe {
+		t += " ⚠ can change how the workload runs"
+	}
 	return t
 }
 

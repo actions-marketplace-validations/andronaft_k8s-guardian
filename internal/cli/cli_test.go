@@ -81,7 +81,7 @@ func TestJSONOutput(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &res); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, out)
 	}
-	if res.Summary.Errors != 6 || res.Summary.Fixable != 9 || len(res.Findings) != 14 {
+	if res.Summary.Errors != 6 || res.Summary.Fixable != 1 || len(res.Findings) != 12 {
 		t.Errorf("unexpected summary %+v (%d findings)", res.Summary, len(res.Findings))
 	}
 }
@@ -103,7 +103,7 @@ func TestGitHubFormat(t *testing.T) {
 		t.Errorf("unexpected summary:\n%s", s)
 	}
 	o, _ := os.ReadFile(output)
-	if !strings.Contains(string(o), "errors=6\n") || !strings.Contains(string(o), "fixable=9\n") {
+	if !strings.Contains(string(o), "errors=6\n") || !strings.Contains(string(o), "fixable=1\n") {
 		t.Errorf("unexpected outputs:\n%s", o)
 	}
 }
@@ -114,11 +114,11 @@ func TestFixInPlace(t *testing.T) {
 	if code != ExitFindings { // KG010 (:latest) can't be fixed without --ai
 		t.Errorf("expected remaining findings, got exit %d", code)
 	}
-	if !strings.Contains(errOut, "applied 9 fix(es)") {
+	if !strings.Contains(errOut, "applied 1 fix(es)") || !strings.Contains(errOut, "4 more with --fix --unsafe-fixes") {
 		t.Errorf("unexpected report:\n%s", errOut)
 	}
 	fixed, _ := os.ReadFile(path)
-	if !strings.Contains(string(fixed), "# TODO pin me") || strings.Contains(string(fixed), "hostNetwork") {
+	if !strings.Contains(string(fixed), "# TODO pin me") || !strings.Contains(string(fixed), "type: RuntimeDefault") || strings.Contains(string(fixed), "runAsNonRoot") {
 		t.Errorf("unexpected fixed file:\n%s", fixed)
 	}
 	// Idempotent: a second run changes nothing.
@@ -132,8 +132,16 @@ func TestFixInPlace(t *testing.T) {
 	before, _ := os.ReadFile(orig)
 	_, out, _ := run(t, "check", "-f", orig, "--fix", "--stdout")
 	after, _ := os.ReadFile(orig)
-	if !bytes.Equal(before, after) || !strings.Contains(out, "runAsNonRoot: true") {
+	if !bytes.Equal(before, after) || !strings.Contains(out, "type: RuntimeDefault") {
 		t.Error("--stdout must print the fix and not touch the file")
+	}
+	// --unsafe-fixes applies the rest; host access stays as it is.
+	_, out, errOut = run(t, "check", "-f", orig, "--fix", "--stdout", "--unsafe-fixes")
+	if !strings.Contains(errOut, "applied 5 fix(es)") || !strings.Contains(out, "runAsNonRoot: true") || !strings.Contains(out, "hostNetwork: true") {
+		t.Errorf("unexpected --unsafe-fixes result:\n%s\n%s", errOut, out)
+	}
+	if code, _, errOut := run(t, "check", "-f", orig, "--unsafe-fixes"); code != ExitError || !strings.Contains(errOut, "requires --fix") {
+		t.Errorf("--unsafe-fixes without --fix: %d %s", code, errOut)
 	}
 }
 
@@ -222,7 +230,7 @@ func TestKustomize(t *testing.T) {
 	// -f on a kustomization directory renders it as well, and --fix prints
 	// the fixed YAML because rendered output can't be written back.
 	_, out, _ = run(t, "check", "-f", dir, "--fix")
-	if !strings.Contains(out, "namespace: shop") || !strings.Contains(out, "runAsNonRoot: true") {
+	if !strings.Contains(out, "namespace: shop") || !strings.Contains(out, "allowPrivilegeEscalation: false") {
 		t.Errorf("fixed kustomize output:\n%s", out)
 	}
 	if code, _, errOut := run(t, "check", "-k", "testdata"); code != ExitError || !strings.Contains(errOut, "no kustomization.yaml") {
@@ -289,7 +297,7 @@ func TestFixKeepsNonObjectDocuments(t *testing.T) {
 	os.WriteFile(path, []byte("# header\n---\napiVersion: v1\nkind: Pod\nmetadata: {name: p}\nspec:\n  containers: [{name: c, image: nginx}]\n---\n- a list document\n- kept as is\n---\njust a scalar\n"), 0o600)
 	run(t, "check", "-f", path, "--fix")
 	out, _ := os.ReadFile(path)
-	for _, want := range []string{"# header", "runAsNonRoot: true", "- a list document", "- kept as is", "just a scalar"} {
+	for _, want := range []string{"# header", "allowPrivilegeEscalation: false", "- a list document", "- kept as is", "just a scalar"} {
 		if !strings.Contains(string(out), want) {
 			t.Errorf("missing %q after --fix:\n%s", want, out)
 		}

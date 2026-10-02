@@ -26,6 +26,7 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	f.cluster(fs)
 	fs.BoolVar(&f.fix, "fix", false, "auto-fix findings (deterministic fixes; add --ai for Claude-powered fixes)")
 	fs.BoolVar(&f.stdout, "stdout", false, "with --fix: print fixed YAML to stdout instead of rewriting files")
+	fs.BoolVar(&f.unsafeFixes, "unsafe-fixes", false, "with --fix: also apply fixes that can change how the workload runs (runAsNonRoot, readOnlyRootFilesystem, drop ALL capabilities, default resources)")
 	fs.BoolVar(&f.live, "live", false, "also validate against the live cluster (quotas, nodes, LimitRanges, references, CRDs)")
 	fs.BoolVar(&f.interact, "interactive", false, "review fixes in the interactive TUI (same as the interactive command)")
 	fs.BoolVar(&f.interact, "i", false, "shorthand for --interactive")
@@ -45,6 +46,9 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	}
 	if f.ai && !f.fix {
 		return ExitError, errors.New("--ai requires --fix (or use the interactive command)")
+	}
+	if f.unsafeFixes && !f.fix {
+		return ExitError, errors.New("--unsafe-fixes requires --fix")
 	}
 	opts, err := f.options()
 	if err != nil {
@@ -78,6 +82,7 @@ func (a *App) audit(ctx context.Context, args []string) (int, error) {
 	fs.BoolVar(&f.allNamespaces, "A", false, "all namespaces")
 	fs.BoolVar(&f.allNamespaces, "all-namespaces", false, "all namespaces")
 	fs.BoolVar(&f.fix, "fix", false, "print fixed YAML to stdout (review, then pipe into kubectl apply -f -)")
+	fs.BoolVar(&f.unsafeFixes, "unsafe-fixes", false, "with --fix: also apply fixes that can change how the workload runs (runAsNonRoot, readOnlyRootFilesystem, drop ALL capabilities, default resources)")
 	pos, err := parse(fs, args)
 	if err != nil {
 		return ExitError, err
@@ -92,6 +97,9 @@ func (a *App) audit(ctx context.Context, args []string) (int, error) {
 	}
 	if f.ai && !f.fix {
 		return ExitError, errors.New("--ai requires --fix")
+	}
+	if f.unsafeFixes && !f.fix {
+		return ExitError, errors.New("--unsafe-fixes requires --fix")
 	}
 	opts, err := f.options()
 	if err != nil {

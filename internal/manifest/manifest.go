@@ -51,6 +51,16 @@ type File struct {
 	Docs     []*yaml.Node
 	Objects  []*Object
 	Writable bool // false for rendered Helm charts and cluster resources
+
+	// raw holds the original text of each document in Docs, so Encode can
+	// write documents that were not modified byte for byte. nil when the
+	// stream could not be split reliably.
+	raw []rawDoc
+}
+
+type rawDoc struct {
+	text    []byte // original source of the document
+	encoded []byte // how the unmodified document encodes
 }
 
 // Parse decodes a (possibly multi-document) YAML stream.
@@ -77,7 +87,136 @@ func Parse(data []byte, source string) (*File, error) {
 			f.addObject(d.Content[0])
 		}
 	}
+	f.raw = rawDocuments(data, f.Docs)
 	return f, nil
+}
+
+var (
+	docStart = regexp.MustCompile(`^---[ \t]*$`)
+	// Markers this simple splitter does not understand: directives,
+	// document end markers and content on the "---" line.
+	docUnsupported = regexp.MustCompile(`^(%|\.\.\.|---[ \t]*[^ \t#])`)
+	commentOnly    = regexp.MustCompile(`^\s*(#.*)?$`)
+)
+
+// rawDocuments splits data at "---" lines and pairs every decoded document
+// with its source text. It returns nil when the pairing is not exact.
+func rawDocuments(data []byte, docs []*yaml.Node) []rawDoc {
+	type chunk struct {
+		first, last int // 1-based line range of the chunk's content
+		text        []byte
+	}
+	var chunks []chunk
+	lines := bytes.SplitAfter(data, []byte("\n"))
+	cur := chunk{first: 1}
+	for i, l := range lines {
+		n := i + 1
+		trimmed := bytes.TrimRight(l, "\r\n")
+		if docUnsupported.Match(trimmed) {
+			return nil
+		}
+		if docStart.Match(trimmed) {
+			cur.last = n - 1
+			chunks = append(chunks, cur)
+			cur = chunk{first: n + 1}
+			continue
+		}
+		cur.text = append(cur.text, l...)
+	}
+	cur.last = len(lines)
+	chunks = append(chunks, cur)
+
+	owner := make([]int, len(chunks))
+	for i := range owner {
+		owner[i] = -1
+	}
+	for di, d := range docs {
+		line := d.Content[0].Line
+		ci := -1
+		for i, c := range chunks {
+			if line >= c.first && line <= c.last {
+				ci = i
+				break
+			}
+		}
+		// A comment-only document decodes to an empty null scalar positioned
+		// at the next "---"; it belongs to the chunk that ends right before.
+		if n := d.Content[0]; n.Kind == yaml.ScalarNode && n.Tag == "!!null" && n.Value == "" {
+			for i, c := range chunks {
+				if c.last == line-1 && owner[i] < 0 {
+					ci = i
+					break
+				}
+			}
+		}
+		if ci < 0 || owner[ci] >= 0 {
+			return nil
+		}
+		owner[ci] = di
+	}
+
+	raw := make([]rawDoc, len(docs))
+	var pending []byte // comment-only chunks, kept with the next document
+	last := -1
+	for i, c := range chunks {
+		di := owner[i]
+		if di < 0 {
+			for _, l := range bytes.Split(c.text, []byte("\n")) {
+				if !commentOnly.Match(l) {
+					return nil
+				}
+			}
+			if len(bytes.TrimSpace(c.text)) > 0 {
+				pending = append(pending, c.text...)
+			}
+			continue
+		}
+		text := append(pending, c.text...)
+		pending = nil
+		if len(text) > 0 && text[len(text)-1] != '\n' {
+			text = append(text, '\n')
+		}
+		enc, err := encodeDoc(docs[di])
+		if err != nil {
+			return nil
+		}
+		raw[di] = rawDoc{text: text, encoded: enc}
+		last = di
+	}
+	if len(pending) > 0 {
+		if last < 0 {
+			return nil
+		}
+		raw[last].text = append(raw[last].text, pending...)
+	}
+	return raw
+}
+
+func encodeDoc(d *yaml.Node) ([]byte, error) {
+	var buf bytes.Buffer
+	enc := yaml.NewEncoder(&buf)
+	enc.SetIndent(2)
+	if err := enc.Encode(d); err != nil {
+		return nil, err
+	}
+	if err := enc.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// keepBlockScalars switches block scalars that yaml.v3 cannot round-trip
+// (a leading empty line is dropped) to double-quoted style.
+func keepBlockScalars(n *yaml.Node) {
+	if n == nil {
+		return
+	}
+	if n.Kind == yaml.ScalarNode && n.Style&(yaml.LiteralStyle|yaml.FoldedStyle) != 0 && strings.HasPrefix(n.Value, "\n") {
+		n.Style = yaml.DoubleQuotedStyle
+	}
+	for _, c := range n.Content {
+		keepBlockScalars(c)
+	}
 }
 
 func (f *File) addObject(root *yaml.Node) {
@@ -101,17 +240,27 @@ func (f *File) addObject(root *yaml.Node) {
 }
 
 // Encode renders the file back to YAML.
+// Documents that were not modified are written exactly as they were read;
+// modified ones are re-encoded.
 func (f *File) Encode() ([]byte, error) {
 	var buf bytes.Buffer
-	enc := yaml.NewEncoder(&buf)
-	enc.SetIndent(2)
-	for _, d := range f.Docs {
-		if err := enc.Encode(d); err != nil {
+	for i, d := range f.Docs {
+		if i > 0 {
+			buf.WriteString("---\n")
+		}
+		enc, err := encodeDoc(d)
+		if err != nil {
 			return nil, err
 		}
-	}
-	if err := enc.Close(); err != nil {
-		return nil, err
+		if len(f.raw) == len(f.Docs) && f.raw[i].text != nil && bytes.Equal(enc, f.raw[i].encoded) {
+			buf.Write(f.raw[i].text)
+			continue
+		}
+		keepBlockScalars(d)
+		if enc, err = encodeDoc(d); err != nil {
+			return nil, err
+		}
+		buf.Write(enc)
 	}
 	return buf.Bytes(), nil
 }

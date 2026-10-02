@@ -48,12 +48,13 @@ func TestInteractiveAcceptSkip(t *testing.T) {
 			manual++
 		}
 	}
-	if fixable != 9 || manual != 5 {
-		t.Fatalf("expected 9 rule fixes and 5 manual items, got %d/%d", fixable, manual)
+	// Privileged and host-namespace findings have no deterministic fix.
+	if fixable != 5 || manual != 7 {
+		t.Fatalf("expected 5 rule fixes and 7 manual items, got %d/%d", fixable, manual)
 	}
 	m := New(ps, nil)
 	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
-	if v := m.View(); !strings.Contains(v, "hostNetwork") || !strings.Contains(v, "- ") {
+	if v := m.View(); !strings.Contains(v, "seccompProfile") || !strings.Contains(v, "+ ") {
 		t.Errorf("view should show the first finding and a diff:\n%s", v)
 	}
 	first := ps[0]
@@ -77,7 +78,7 @@ func TestInteractiveAcceptSkip(t *testing.T) {
 	}
 	out, _ := f.Encode()
 	s := string(out)
-	if strings.Contains(s, "hostNetwork") {
+	if !strings.Contains(s, "type: RuntimeDefault") {
 		t.Error("accepted fix not applied")
 	}
 	if !strings.Contains(s, "# TODO pin me") {
