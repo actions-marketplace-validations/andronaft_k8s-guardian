@@ -304,7 +304,8 @@ func intersect(a, b []string) []string {
 }
 
 // builtinPolicies are hand-written CEL equivalents of built-in rules that
-// can be decided from a single object at admission time.
+// can be decided from a single object at admission time. KG005 and KG007
+// pass privileged containers, like the engine (KG004 reports them).
 var builtinPolicies = map[string]policy{
 	"KG001": {scope: "container", expr: `has(c.resources) && has(c.resources.requests) && 'cpu' in c.resources.requests && 'memory' in c.resources.requests`},
 	"KG002": {scope: "container", expr: `has(c.resources) && has(c.resources.limits) && 'memory' in c.resources.limits`},
@@ -313,9 +314,9 @@ var builtinPolicies = map[string]policy{
 		`(has(variables.podSpec.securityContext) && ((has(variables.podSpec.securityContext.runAsNonRoot) && variables.podSpec.securityContext.runAsNonRoot) || ` +
 		`(has(variables.podSpec.securityContext.runAsUser) && variables.podSpec.securityContext.runAsUser != 0))))`},
 	"KG004": {scope: "container", expr: `!has(c.securityContext) || !has(c.securityContext.privileged) || !c.securityContext.privileged`},
-	"KG005": {scope: "container", expr: `has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation`},
+	"KG005": {scope: "container", expr: `(has(c.securityContext) && has(c.securityContext.privileged) && c.securityContext.privileged) || has(c.securityContext) && has(c.securityContext.allowPrivilegeEscalation) && !c.securityContext.allowPrivilegeEscalation`},
 	"KG006": {scope: "container", expr: `has(c.securityContext) && has(c.securityContext.readOnlyRootFilesystem) && c.securityContext.readOnlyRootFilesystem`},
-	"KG007": {scope: "container", expr: `has(c.securityContext) && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop.exists(d, d.upperAscii() == 'ALL')`},
+	"KG007": {scope: "container", expr: `(has(c.securityContext) && has(c.securityContext.privileged) && c.securityContext.privileged) || has(c.securityContext) && has(c.securityContext.capabilities) && has(c.securityContext.capabilities.drop) && c.securityContext.capabilities.drop.exists(d, d.upperAscii() == 'ALL')`},
 	"KG010": {scope: "container", expr: `has(c.image) && (c.image.contains('@sha256:') || (c.image.substring(c.image.lastIndexOf('/') + 1).contains(':') && !c.image.endsWith(':latest')))`},
 	"KG011": {scope: "pod", expr: `!(has(variables.podSpec.hostNetwork) && variables.podSpec.hostNetwork) && !(has(variables.podSpec.hostPID) && variables.podSpec.hostPID) && !(has(variables.podSpec.hostIPC) && variables.podSpec.hostIPC)`},
 	"KG012": {scope: "pod", expr: `!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.hostPath))`},
