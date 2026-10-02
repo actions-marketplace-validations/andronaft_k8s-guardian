@@ -14,7 +14,7 @@ spec:
     guard-workloads audits Kubernetes manifests, Helm charts, Kustomize
     overlays and live cluster resources for missing resource requests and
     limits, root containers, privilege escalation, missing probes, mutable
-    image tags, host namespaces and more. It fixes most findings
+    image tags, host namespaces and more. It fixes what is safe to fix
     automatically while keeping YAML comments, checks whether a manifest
     fits the target cluster (quotas, node capacity, LimitRanges, missing
     ConfigMaps/Secrets) and flags breaking changes against what is deployed.
