@@ -1,6 +1,6 @@
 # Custom rules
 
-With custom rules you can enforce your organisation's policies without writing Rego or Kyverno templates. Write them by hand, or let Claude write them:
+With custom rules you can enforce your organisation's policies without writing Rego or Kyverno templates. Write them by hand, or let Claude draft them (`rule create` is [experimental](ai.md#policies-from-plain-language-experimental): review what it generates):
 
 ```bash
 k8s-guardian rule create "Every Deployment needs a team label and at most 4 CPUs per container"
