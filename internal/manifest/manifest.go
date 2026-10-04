@@ -289,6 +289,21 @@ var looksLikeManifest = regexp.MustCompile(`(?m)^\s*apiVersion:`)
 // broken manifest must fail the check), and Helm charts that can't be
 // rendered are skipped with a warning.
 func LoadWithWarnings(path string) ([]*File, []string, error) {
+	return LoadWith(path, LoadOptions{})
+}
+
+// LoadOptions customise how inputs are rendered.
+type LoadOptions struct {
+	// HelmValues (values files) and HelmSet (key=value) are passed to
+	// `helm template` for a chart given as path itself, not for charts
+	// found while walking a directory.
+	HelmValues, HelmSet []string
+	// Exclude, when set, skips files and directories during directory walks.
+	Exclude func(path string) bool
+}
+
+// LoadWith is LoadWithWarnings with options.
+func LoadWith(path string, o LoadOptions) ([]*File, []string, error) {
 	if path == "-" {
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
@@ -312,7 +327,7 @@ func LoadWithWarnings(path string) ([]*File, []string, error) {
 		return []*File{f}, nil, nil
 	}
 	if isChart(path) {
-		f, err := renderChart(path)
+		f, err := renderChart(path, o)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -341,6 +356,12 @@ func LoadWithWarnings(path string) ([]*File, []string, error) {
 			return err
 		}
 		p := filepath.Join(path, rel)
+		if rel != "." && o.Exclude != nil && o.Exclude(p) {
+			if d.IsDir() {
+				return fs.SkipDir
+			}
+			return nil
+		}
 		if d.Type()&fs.ModeSymlink != 0 {
 			warnings = append(warnings, fmt.Sprintf("skipped symlink %s", p))
 			return nil
@@ -353,7 +374,7 @@ func LoadWithWarnings(path string) ([]*File, []string, error) {
 				return fs.SkipDir
 			}
 			if isChart(p) {
-				f, err := renderChart(p)
+				f, err := renderChart(p, LoadOptions{})
 				if err != nil {
 					warnings = append(warnings, fmt.Sprintf("skipped Helm chart %s: %v", p, err))
 				} else {
@@ -393,17 +414,33 @@ func loadFile(path string) (*File, error) {
 	return Parse(data, path)
 }
 
+// IsChart reports whether dir is a Helm chart.
+func IsChart(dir string) bool { return isChart(dir) }
+
 func isChart(dir string) bool {
 	_, err := os.Stat(filepath.Join(dir, "Chart.yaml"))
 	return err == nil
 }
 
-func renderChart(dir string) (*File, error) {
+// HelmArgs returns the `helm template` arguments for a chart. Values are
+// passed as --flag=value so none of them can become another helm flag.
+func HelmArgs(dir string, o LoadOptions) []string {
+	args := []string{"template", "k8s-guardian", dir}
+	for _, v := range o.HelmValues {
+		args = append(args, "--values="+v)
+	}
+	for _, s := range o.HelmSet {
+		args = append(args, "--set="+s)
+	}
+	return args
+}
+
+func renderChart(dir string, o LoadOptions) (*File, error) {
 	if _, err := exec.LookPath("helm"); err != nil {
 		return nil, fmt.Errorf("%s is a Helm chart but `helm` was not found in PATH", dir)
 	}
 	var stderr bytes.Buffer
-	cmd := exec.Command("helm", "template", "k8s-guardian", dir) // #nosec G204 -- no shell; dir is a local chart directory
+	cmd := exec.Command("helm", HelmArgs(dir, o)...) // #nosec G204 -- no shell; a local chart directory and --flag=value arguments
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {

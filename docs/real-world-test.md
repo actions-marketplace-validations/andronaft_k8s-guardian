@@ -58,6 +58,18 @@ Every finding was checked against the rendered YAML. None of the remaining
 ones is wrong about the manifest. Whether it matters is a policy decision,
 which is what the severities, `--skip` and the ignore annotation are for.
 
+## Rules added after this run
+
+KG018 (`rbac-wildcard`) was added later and checked on the same charts before release. It reports 7 roles, one finding each:
+
+* Argo CD: `argocd-application-controller` (`"*"` verbs and resources) and `argocd-server` (`"*"` resources);
+* KEDA: `keda-operator`;
+* Kyverno: `kyverno:migrate-resources`;
+* Longhorn: `longhorn-role` and the `longhorn` Role;
+* Velero: `velero-server`.
+
+All of these really grant wildcards. Whether that is acceptable for a controller like Argo CD is a policy decision; the rule is a warning, and the ignore annotation or `skip` handles deliberate cases. The other numbers on this page are unchanged by the later releases.
+
 ## Checks on `--fix`
 
 For every chart, in both modes (`--fix` and `--fix --unsafe-fixes`):

@@ -153,7 +153,7 @@ func Estimate(objs []*manifest.Object, p Pricing) []*Workload {
 		w.PodCPU, w.PodMemory = max(sumCPU, initCPU), max(sumMem, initMem)
 
 		switch o.Kind() {
-		case "Deployment", "StatefulSet", "ReplicaSet", "ReplicationController":
+		case "Deployment", "StatefulSet", "ReplicaSet", "ReplicationController", "Rollout":
 			n := atoi(yamlx.String(o.Root, "spec", "replicas"), 1)
 			w.MinReplicas, w.MaxReplicas = n, n
 			if r, ok := hpas[o.Namespace()+"|"+o.Ref()]; ok {

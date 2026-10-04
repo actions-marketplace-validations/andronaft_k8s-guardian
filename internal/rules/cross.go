@@ -201,6 +201,37 @@ func init() {
 				return nil
 			},
 		},
+		&Rule{
+			ID: "KG018", Name: "rbac-wildcard", Severity: Warning,
+			Description: "Roles and ClusterRoles should list the verbs and resources they need instead of \"*\".",
+			Resource: func(o *manifest.Object, _ []*manifest.Object) []string {
+				if o.Kind() != "Role" && o.Kind() != "ClusterRole" {
+					return nil
+				}
+				// One finding per role: rule indexes per wildcard field.
+				wild := map[string][]string{}
+				for i, r := range yamlx.Items(yamlx.Get(o.Root, "rules")) {
+					for _, field := range []string{"verbs", "resources"} {
+						for _, v := range yamlx.Items(yamlx.Get(r, field)) {
+							if v.Value == "*" {
+								wild[field] = append(wild[field], strconv.Itoa(i))
+								break
+							}
+						}
+					}
+				}
+				var parts []string
+				for _, field := range []string{"verbs", "resources"} {
+					if idx := wild[field]; len(idx) > 0 {
+						parts = append(parts, fmt.Sprintf("\"*\" %s in rules[%s]", field, strings.Join(idx, ",")))
+					}
+				}
+				if len(parts) == 0 {
+					return nil
+				}
+				return []string{"grants " + strings.Join(parts, " and ")}
+			},
+		},
 	)
 }
 

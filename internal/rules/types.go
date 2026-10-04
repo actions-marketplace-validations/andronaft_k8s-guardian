@@ -142,12 +142,13 @@ var podSpecPaths = map[string][]string{
 	"ReplicationController": {"spec", "template", "spec"},
 	"Job":                   {"spec", "template", "spec"},
 	"CronJob":               {"spec", "jobTemplate", "spec", "template", "spec"},
+	"Rollout":               {"spec", "template", "spec"}, // Argo Rollouts (argoproj.io)
 }
 
 // NewTarget returns the workload view of o, or nil if o has no pod spec.
 func NewTarget(o *manifest.Object) *Target {
 	path, ok := podSpecPaths[o.Kind()]
-	if !ok {
+	if !ok || o.Kind() == "Rollout" && !strings.HasPrefix(o.APIVersion(), "argoproj.io/") {
 		return nil
 	}
 	spec := yamlx.Path(o.Root, path...)

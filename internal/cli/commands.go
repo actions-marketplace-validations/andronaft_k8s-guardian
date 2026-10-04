@@ -50,7 +50,7 @@ func (a *App) diff(args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files, a.Stderr)
+	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -156,7 +156,7 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files, a.Stderr)
+	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -344,7 +344,7 @@ func (a *App) runInteractive(f *flags) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
-	files, err := loadFiles(f.files, a.Stderr)
+	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -495,7 +495,7 @@ func (a *App) ruleCreate(ctx context.Context, args []string) (int, error) {
 		fmt.Fprintf(a.Stderr, "✏️  wrote %s (%s)\n", path, d.Spec.ID)
 	}
 	if len(f.files) > 0 {
-		files, err := loadFiles(f.files, a.Stderr)
+		files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
 		if err != nil {
 			return ExitError, err
 		}

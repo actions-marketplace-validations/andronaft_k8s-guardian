@@ -92,7 +92,7 @@ var namespaced = map[string]bool{
 	"Pod": true, "Deployment": true, "StatefulSet": true, "DaemonSet": true, "ReplicaSet": true, "ReplicationController": true,
 	"Job": true, "CronJob": true, "Service": true, "ConfigMap": true, "Secret": true, "ServiceAccount": true,
 	"PersistentVolumeClaim": true, "Ingress": true, "Role": true, "RoleBinding": true, "NetworkPolicy": true,
-	"HorizontalPodAutoscaler": true, "PodDisruptionBudget": true,
+	"HorizontalPodAutoscaler": true, "PodDisruptionBudget": true, "Rollout": true,
 }
 
 func (ch *checker) note(what string, err error) {
@@ -304,7 +304,7 @@ func replicas(t *rules.Target, nodes int) int64 {
 	root := t.Obj.Root
 	var s string
 	switch t.Obj.Kind() {
-	case "Deployment", "StatefulSet", "ReplicaSet", "ReplicationController":
+	case "Deployment", "StatefulSet", "ReplicaSet", "ReplicationController", "Rollout":
 		s = yamlx.String(root, "spec", "replicas")
 	case "Job":
 		s = yamlx.String(root, "spec", "parallelism")
