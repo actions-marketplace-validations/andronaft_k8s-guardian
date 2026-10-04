@@ -411,29 +411,36 @@ func (a *App) listRules(args []string) error {
 }
 
 func (a *App) usage() {
-	fmt.Fprintf(a.Stdout, `%[1]s %[2]s — AI-powered Kubernetes guardrails
+	fmt.Fprintf(a.Stdout, `%[1]s %[2]s — Kubernetes guardrails that know your cluster
 
 Validate:
   %[1]s check -f <file|dir|chart|->         Validate manifests (files, directories, Helm charts, stdin)
+  %[1]s check -f chart/ --values prod.yaml  Render a Helm chart with your values (also --set k=v)
   %[1]s check -k overlays/prod              Validate a Kustomize overlay
   %[1]s check -f app.yaml --live -n prod    ...and against the real cluster: quotas, node capacity,
                                             LimitRanges, missing ConfigMaps/Secrets, CRDs, StorageClasses
   %[1]s audit deployment/my-app -n prod     Validate live cluster resources
 
 Fix:
-  %[1]s check -f app.yaml --fix             Auto-fix in place (resources, securityContext, seccomp, ...)
+  %[1]s check -f app.yaml --fix             Apply the safe fixes in place (comments kept)
+  %[1]s check -f app.yaml --fix --unsafe-fixes   ...plus fixes that can change how the app runs
   %[1]s check -f app.yaml --fix --ai        Let Claude fix the rest (probes, image tags, custom rules)
-  %[1]s interactive -f app.yaml [--ai]      Review every fix in a TUI: [y] accept [n] skip [e] edit
+  %[1]s interactive -f app.yaml [--ai]      Review every fix in a TUI (experimental)
+
+Existing repository:
+  %[1]s check -f k8s/ --update-baseline     Record today's findings in .k8s-guardian-baseline.json
+  %[1]s check -f k8s/ --baseline <file>     ...then report only new ones
+                                            Settings (skip, severity, exclude, baseline): .k8s-guardian.yaml
 
 Before you deploy:
   %[1]s diff -f app.yaml -n prod            Compare with the cluster and flag breaking changes
                                             (immutable selectors, removed APIs, downtime, port changes)
   %[1]s cost -f app.yaml [--usage|--prometheus URL] [--ai]
-                                            Estimate $/month; compare with real usage (snapshot or 7d history);
+                                            Estimate $/month (experimental); compare with real usage;
                                             Claude right-sizes requests and shows savings
 
 Policies & integrations:
-  %[1]s rule create "<policy in plain English>"   Generate a custom rule with Claude
+  %[1]s rule create "<policy in plain English>"   Draft a custom rule with Claude (experimental)
   %[1]s export vap > policies.yaml          Enforce built-in + custom rules in the cluster itself
                                             (ValidatingAdmissionPolicy / CEL, no Kyverno or OPA needed)
   %[1]s export kyverno > policies.yaml      ...or as Kyverno ClusterPolicies (CEL)
@@ -444,7 +451,7 @@ Shorthands (kubectl plugin style):
   %[1]s -f app.yaml                         same as "check -f app.yaml"
   %[1]s deployment/my-app -n prod           same as "audit deployment/my-app -n prod"
 
-Common flags: --format text|json|sarif|github|markdown  --fail-on error|warning|info  --skip KG006,KG015  --rules <path>
+Common flags: --format text|json|sarif|github|markdown  --fail-on error|warning|info  --skip KG006,KG015  --rules <path>  --config <file>
 Exit codes: 0 ok, 1 findings at/above --fail-on, 2 usage or runtime error.
 Environment: ANTHROPIC_API_KEY (for --ai), K8S_GUARDIAN_MODEL (default %[3]s),
              K8S_GUARDIAN_RULES, K8S_GUARDIAN_CPU_HOUR / K8S_GUARDIAN_GIB_HOUR (cost).

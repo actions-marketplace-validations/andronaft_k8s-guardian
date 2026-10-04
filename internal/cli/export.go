@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/andronaft/k8s-guardian/internal/config"
 	"github.com/andronaft/k8s-guardian/internal/custom"
 	"github.com/andronaft/k8s-guardian/internal/export"
 	"github.com/andronaft/k8s-guardian/internal/fsutil"
@@ -26,6 +27,7 @@ func (a *App) export(args []string) (int, error) {
 	fs.StringVar(&action, "action", "", "override the action for every policy: Deny, Warn or Audit (default: error→Deny, warning→Warn, info→Audit)")
 	fs.StringVar(&exclude, "exclude-namespaces", "kube-system", "comma separated namespaces the policies never apply to")
 	fs.StringVar(&out, "o", "", "write to this file instead of stdout")
+	fs.StringVar(&f.configPath, "config", "", "config file whose rules are exported too (default: "+config.Names[0]+" in the working directory, if present)")
 	if _, err := parse(fs, args[1:]); err != nil {
 		return ExitError, err
 	}
@@ -46,10 +48,15 @@ func (a *App) export(args []string) (int, error) {
 			ids = append(ids, strings.TrimSpace(id))
 		}
 	}
+	c, err := f.config()
+	if err != nil {
+		return ExitError, err
+	}
 	paths := []string{custom.DefaultDir}
 	if env := os.Getenv("K8S_GUARDIAN_RULES"); env != "" {
 		paths = append(paths, filepath.SplitList(env)...)
 	}
+	paths = append(paths, c.Rules...)
 	docs, _, err := custom.LoadDocuments(append(paths, f.rulePaths...))
 	if err != nil {
 		return ExitError, err

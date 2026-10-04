@@ -453,3 +453,13 @@ func TestBaseline(t *testing.T) {
 		t.Errorf("--fix --update-baseline: %d %s", code, errOut)
 	}
 }
+
+func TestExportUsesConfigRules(t *testing.T) {
+	rulesDir, _ := filepath.Abs("../../examples/rules")
+	t.Chdir(t.TempDir())
+	os.WriteFile(".k8s-guardian.yaml", []byte("rules: ["+rulesDir+"]\n"), 0o600)
+	code, out, errOut := run(t, "export", "vap", "--builtin", "none")
+	if code != ExitOK || !strings.Contains(out, "org001") {
+		t.Errorf("config rules not exported: %d %s\n%s", code, errOut, out)
+	}
+}
