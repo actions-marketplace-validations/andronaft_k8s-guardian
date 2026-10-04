@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
@@ -345,5 +346,110 @@ func TestWalkNeverFollowsSymlinksOutOfTheRepo(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "skipped symlink") {
 		t.Errorf("expected a warning about skipped symlinks, got %q", errOut)
+	}
+}
+
+// Cross-file rules must see every input in --fix mode too.
+func TestFixValidatesFilesTogether(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "deploy.yaml"), []byte("apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: web}\nspec:\n  template:\n    spec:\n      containers: [{name: web, image: nginx:1.27}]\n"), 0o600)
+	os.WriteFile(filepath.Join(dir, "hpa.yaml"), []byte("apiVersion: autoscaling/v2\nkind: HorizontalPodAutoscaler\nmetadata: {name: web}\nspec:\n  scaleTargetRef: {kind: Deployment, name: web}\n  minReplicas: 2\n  maxReplicas: 5\n"), 0o600)
+	for _, args := range [][]string{{"check", "-f", dir}, {"check", "-f", dir, "--fix", "--stdout"}} {
+		_, out, errOut := run(t, args...)
+		if strings.Contains(out+errOut, "KG015") {
+			t.Errorf("%v: KG015 reported although an HPA keeps 2 replicas:\n%s%s", args, out, errOut)
+		}
+	}
+}
+
+func TestHelmValues(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	const chart = "testdata/chart"
+	cases := []struct {
+		args      []string
+		want, not string
+	}{
+		{nil, "KG010", ""},
+		{[]string{"--values", chart + "/values-prod.yaml"}, "KG015", "KG010"},
+		{[]string{"--values", chart + "/values-prod.yaml", "--set", "replicas=3"}, "", "KG015"},
+	}
+	for _, c := range cases {
+		_, out, errOut := run(t, append([]string{"check", "-f", chart}, c.args...)...)
+		if c.want != "" && !strings.Contains(out, c.want) || c.not != "" && strings.Contains(out, c.not) {
+			t.Errorf("%v: want %q, not %q:\n%s%s", c.args, c.want, c.not, out, errOut)
+		}
+	}
+	// Values only make sense for a chart passed explicitly.
+	if code, _, errOut := run(t, "check", "-f", insecure, "--set", "a=b"); code != ExitError || !strings.Contains(errOut, "need a Helm chart") {
+		t.Errorf("--set without a chart: %d %s", code, errOut)
+	}
+}
+
+func TestConfigFile(t *testing.T) {
+	src, _ := filepath.Abs(insecure)
+	dir := t.TempDir()
+	t.Chdir(dir)
+	data, _ := os.ReadFile(src)
+	os.MkdirAll("k8s", 0o750)
+	os.MkdirAll("vendor", 0o750)
+	os.WriteFile("k8s/app.yaml", data, 0o600)
+	os.WriteFile("vendor/other.yaml", data, 0o600)
+	os.WriteFile(".k8s-guardian.yaml", []byte("skip: [KG015]\nseverity: {KG014: error}\nexclude: [vendor]\n"), 0o600)
+
+	_, out, _ := run(t, "check", "-f", ".")
+	if strings.Contains(out, "KG015") || strings.Contains(out, "vendor/other.yaml") {
+		t.Errorf("config skip/exclude ignored:\n%s", out)
+	}
+	if !strings.Contains(out, "error   KG014") {
+		t.Errorf("severity override ignored:\n%s", out)
+	}
+	// failOn from the config; an explicit --fail-on still wins.
+	os.WriteFile(".k8s-guardian.yaml", []byte("skip: [KG001,KG002,KG003,KG004,KG010,KG011]\nfailOn: warning\n"), 0o600)
+	if code, _, _ := run(t, "check", "-f", "k8s"); code != ExitFindings {
+		t.Errorf("failOn: warning from the config: exit %d", code)
+	}
+	if code, _, _ := run(t, "check", "-f", "k8s", "--fail-on", "error"); code != ExitOK {
+		t.Errorf("--fail-on error must override the config: exit %d", code)
+	}
+	// Typos are errors, not silently ignored settings.
+	os.WriteFile(".k8s-guardian.yaml", []byte("severity: {KG999: error}\n"), 0o600)
+	if code, _, errOut := run(t, "check", "-f", "k8s"); code != ExitError || !strings.Contains(errOut, `unknown rule "KG999"`) {
+		t.Errorf("unknown rule in severity: %d %s", code, errOut)
+	}
+}
+
+func TestBaseline(t *testing.T) {
+	src, _ := filepath.Abs(insecure)
+	t.Chdir(t.TempDir())
+	data, _ := os.ReadFile(src)
+	os.WriteFile("app.yaml", data, 0o600)
+
+	if code, _, errOut := run(t, "check", "-f", "app.yaml", "--baseline", "base.json"); code != ExitError || !strings.Contains(errOut, "--update-baseline") {
+		t.Errorf("missing baseline: %d %s", code, errOut)
+	}
+	if code, _, errOut := run(t, "check", "-f", "app.yaml", "--update-baseline", "--baseline", "base.json"); code != ExitOK || !strings.Contains(errOut, "to baseline base.json") {
+		t.Fatalf("update-baseline: %d %s", code, errOut)
+	}
+	code, out, errOut := run(t, "check", "-f", "app.yaml", "--baseline", "base.json")
+	if code != ExitOK || !strings.Contains(errOut, "known finding(s) hidden") || strings.Contains(out, "KG0") {
+		t.Errorf("known findings must not fail the check: %d\n%s%s", code, out, errOut)
+	}
+	// Moving the manifest down a few lines keeps findings known; a new
+	// container with a :latest image is reported.
+	changed := "# a new comment\n\n" + strings.Replace(string(data), "  containers:\n", "  containers:\n        - name: sidecar\n          image: busybox:latest\n", 1)
+	os.WriteFile("app.yaml", []byte(changed), 0o600)
+	code, out, _ = run(t, "check", "-f", "app.yaml", "--baseline", "base.json")
+	if code != ExitFindings || !strings.Contains(out, `"sidecar"`) || strings.Contains(out, `"nginx"`) {
+		t.Errorf("only the new container should be reported: %d\n%s", code, out)
+	}
+	// The config can name the baseline.
+	os.WriteFile(".k8s-guardian.yaml", []byte("baseline: base.json\n"), 0o600)
+	if _, out, _ := run(t, "check", "-f", "app.yaml"); strings.Contains(out, `"nginx"`) {
+		t.Errorf("baseline from the config ignored:\n%s", out)
+	}
+	if code, _, errOut := run(t, "check", "-f", "app.yaml", "--fix", "--update-baseline"); code != ExitError || !strings.Contains(errOut, "can't be combined") {
+		t.Errorf("--fix --update-baseline: %d %s", code, errOut)
 	}
 }

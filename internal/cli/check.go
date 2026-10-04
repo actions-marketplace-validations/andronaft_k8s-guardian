@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/andronaft/k8s-guardian/internal/ai"
+	"github.com/andronaft/k8s-guardian/internal/baseline"
 	"github.com/andronaft/k8s-guardian/internal/cluster"
 	"github.com/andronaft/k8s-guardian/internal/fsutil"
 	"github.com/andronaft/k8s-guardian/internal/guardian"
@@ -30,6 +31,7 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	fs.BoolVar(&f.live, "live", false, "also validate against the live cluster (quotas, nodes, LimitRanges, references, CRDs)")
 	fs.BoolVar(&f.interact, "interactive", false, "review fixes in the interactive TUI (same as the interactive command)")
 	fs.BoolVar(&f.interact, "i", false, "shorthand for --interactive")
+	f.baselineFlags(fs)
 	pos, err := parse(fs, args)
 	if err != nil {
 		return ExitError, err
@@ -40,7 +42,7 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	if f.interact {
 		return a.runInteractive(&f)
 	}
-	failOn, err := rules.ParseSeverity(f.failOn)
+	failOn, err := f.failOnSeverity(fs)
 	if err != nil {
 		return ExitError, err
 	}
@@ -50,6 +52,9 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	if f.unsafeFixes && !f.fix {
 		return ExitError, errors.New("--unsafe-fixes requires --fix")
 	}
+	if f.updateBaseline && f.fix {
+		return ExitError, errors.New("--update-baseline can't be combined with --fix: fix first, then record what is left")
+	}
 	opts, err := f.options()
 	if err != nil {
 		return ExitError, err
@@ -57,7 +62,7 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files, a.Stderr)
+	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -82,6 +87,7 @@ func (a *App) audit(ctx context.Context, args []string) (int, error) {
 	fs.BoolVar(&f.allNamespaces, "A", false, "all namespaces")
 	fs.BoolVar(&f.allNamespaces, "all-namespaces", false, "all namespaces")
 	fs.BoolVar(&f.fix, "fix", false, "print fixed YAML to stdout (review, then pipe into kubectl apply -f -)")
+	f.baselineFlags(fs)
 	fs.BoolVar(&f.unsafeFixes, "unsafe-fixes", false, "with --fix: also apply fixes that can change how the workload runs (runAsNonRoot, readOnlyRootFilesystem, drop ALL capabilities, default resources)")
 	pos, err := parse(fs, args)
 	if err != nil {
@@ -91,7 +97,7 @@ func (a *App) audit(ctx context.Context, args []string) (int, error) {
 		fs.Usage()
 		return ExitError, errors.New("no resource given")
 	}
-	failOn, err := rules.ParseSeverity(f.failOn)
+	failOn, err := f.failOnSeverity(fs)
 	if err != nil {
 		return ExitError, err
 	}
@@ -100,6 +106,9 @@ func (a *App) audit(ctx context.Context, args []string) (int, error) {
 	}
 	if f.unsafeFixes && !f.fix {
 		return ExitError, errors.New("--unsafe-fixes requires --fix")
+	}
+	if f.updateBaseline && f.fix {
+		return ExitError, errors.New("--update-baseline can't be combined with --fix: fix first, then record what is left")
 	}
 	opts, err := f.options()
 	if err != nil {
@@ -129,6 +138,10 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 	if !f.fix {
 		fs := guardian.Validate(files, opts)
 		fs = append(fs, a.liveFindings(cl, objects(files), f, opts)...)
+		fs, done, err := a.finalize(f, fs)
+		if err != nil || done {
+			return exitFor(err), err
+		}
 		if err := report.Write(a.Stdout, f.format, fs, report.Summarize(fs), false); err != nil {
 			return ExitError, err
 		}
@@ -142,6 +155,7 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 	var remaining []rules.Finding
 	fixed := 0
 	var fixedYAML [][]byte
+	var fixedFiles []*manifest.File
 	for _, file := range files {
 		if f.ai {
 			fmt.Fprintf(a.Stderr, "🤖 asking Claude (%s) to fix %s ...\n", ai.Model(f.model), file.Source)
@@ -151,8 +165,7 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 			return ExitError, err
 		}
 		fixed += res.Fixed
-		remaining = append(remaining, res.Remaining...)
-		remaining = append(remaining, a.liveFindings(cl, res.File.Objects, f, opts)...)
+		fixedFiles = append(fixedFiles, res.File)
 		if res.AINotes != "" {
 			fmt.Fprintf(a.Stderr, "\n%s — Claude's changes:\n%s\n\n", file.Source, res.AINotes)
 		}
@@ -173,6 +186,14 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 			}
 			fmt.Fprintf(a.Stderr, "✏️  fixed %s\n", file.Source)
 		}
+	}
+	// Validate the fixed files together, like check does, so rules that
+	// look across files (an HPA next to its Deployment) see everything.
+	remaining = guardian.Validate(fixedFiles, opts)
+	remaining = append(remaining, a.liveFindings(cl, objects(fixedFiles), f, opts)...)
+	remaining, done, err := a.finalize(f, remaining)
+	if err != nil || done {
+		return exitFor(err), err
 	}
 	for i, y := range fixedYAML {
 		if i > 0 {
@@ -195,6 +216,48 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 		return ExitError, err
 	}
 	return exitCode(remaining, failOn), nil
+}
+
+// finalize applies the config's severity overrides and the baseline. With
+// --update-baseline it writes the baseline and reports done.
+func (a *App) finalize(f *flags, fs []rules.Finding) ([]rules.Finding, bool, error) {
+	f.applySeverity(fs)
+	path := f.baseline
+	if path == "" {
+		c, err := f.config()
+		if err != nil {
+			return nil, false, err
+		}
+		path = c.Baseline
+	}
+	if f.updateBaseline {
+		if path == "" {
+			path = defaultBaseline
+		}
+		if err := baseline.Write(path, fs); err != nil {
+			return nil, false, err
+		}
+		fmt.Fprintf(a.Stderr, "wrote %d finding(s) to baseline %s\n", len(fs), path)
+		return nil, true, nil
+	}
+	if path == "" {
+		return fs, false, nil
+	}
+	fs, hidden, err := baseline.Filter(path, fs)
+	if err != nil {
+		return nil, false, err
+	}
+	if hidden > 0 {
+		fmt.Fprintf(a.Stderr, "note: %d known finding(s) hidden by baseline %s\n", hidden, path)
+	}
+	return fs, false, nil
+}
+
+func exitFor(err error) int {
+	if err != nil {
+		return ExitError
+	}
+	return ExitOK
 }
 
 // githubExtras writes the job summary and step outputs for --format github.

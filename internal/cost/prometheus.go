@@ -51,7 +51,7 @@ const safe = `[bcdfghjklmnpqrstvwxz2456789]`
 func PodRegex(kind, name string) string {
 	n := regexp.QuoteMeta(name)
 	switch kind {
-	case "Deployment":
+	case "Deployment", "Rollout": // <name>-<pod-template-hash>-<suffix>
 		return n + "-" + safe + "{1,10}-" + safe + "{5}"
 	case "StatefulSet":
 		return n + "-[0-9]+"

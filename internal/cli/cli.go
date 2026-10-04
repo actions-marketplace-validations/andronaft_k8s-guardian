@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/andronaft/k8s-guardian/internal/ai"
+	"github.com/andronaft/k8s-guardian/internal/config"
 	"github.com/andronaft/k8s-guardian/internal/custom"
 	"github.com/andronaft/k8s-guardian/internal/diff"
 	"github.com/andronaft/k8s-guardian/internal/live"
@@ -143,12 +144,59 @@ func parse(fs *flag.FlagSet, args []string) ([]string, error) {
 // flags holds every option; each command registers the subset it supports.
 type flags struct {
 	files, rulePaths, kustomize     multi
+	helmValues, helmSet             multi
 	format, failOn, skip, model     string
 	fix, ai, stdout, live, interact bool
 	unsafeFixes                     bool
 	namespace, kubeContext          string
 	allNamespaces                   bool
+
+	configPath, baseline string
+	updateBaseline       bool
+	cfg                  *config.Config
+	severity             map[string]rules.Severity // overrides by rule ID/name (lower-case)
 }
+
+// config returns the project configuration, loading it once.
+func (f *flags) config() (*config.Config, error) {
+	if f.cfg == nil {
+		c, err := config.Load(f.configPath)
+		if err != nil {
+			return nil, err
+		}
+		f.cfg = c
+	}
+	return f.cfg, nil
+}
+
+// failOnSeverity resolves --fail-on: the flag if given, else the config.
+func (f *flags) failOnSeverity(fs *flag.FlagSet) (rules.Severity, error) {
+	v := f.failOn
+	set := false
+	fs.Visit(func(fl *flag.Flag) {
+		if fl.Name == "fail-on" {
+			set = true
+		}
+	})
+	if !set {
+		c, err := f.config()
+		if err != nil {
+			return rules.Info, err
+		}
+		if c.FailOn != "" {
+			v = c.FailOn
+		}
+	}
+	return rules.ParseSeverity(v)
+}
+
+// baselineFlags registers --baseline and --update-baseline.
+func (f *flags) baselineFlags(fs *flag.FlagSet) {
+	fs.StringVar(&f.baseline, "baseline", "", "report only findings that are not in this baseline file (default: baseline from the config)")
+	fs.BoolVar(&f.updateBaseline, "update-baseline", false, "write the current findings to the baseline file ("+defaultBaseline+" unless --baseline or the config names one)")
+}
+
+const defaultBaseline = ".k8s-guardian-baseline.json"
 
 func (a *App) flagSet(name, usage string) *flag.FlagSet {
 	fs := flag.NewFlagSet(name, flag.ContinueOnError)
@@ -166,6 +214,8 @@ func (f *flags) input(fs *flag.FlagSet) {
 	fs.Var(&f.files, "file", "alias for -f")
 	fs.Var(&f.kustomize, "k", "Kustomize directory to render and check (repeatable; -f on a kustomization dir works too)")
 	fs.Var(&f.kustomize, "kustomize", "alias for -k")
+	fs.Var(&f.helmValues, "values", "Helm values file for a chart passed with -f (repeatable)")
+	fs.Var(&f.helmSet, "set", "Helm value for a chart passed with -f, e.g. replicaCount=3 (repeatable)")
 }
 
 func (f *flags) output(fs *flag.FlagSet, formats string) {
@@ -177,6 +227,7 @@ func (f *flags) output(fs *flag.FlagSet, formats string) {
 func (f *flags) ruleFlags(fs *flag.FlagSet) {
 	fs.StringVar(&f.skip, "skip", "", "comma separated rule IDs or names to skip (e.g. KG006,liveness-probe)")
 	fs.Var(&f.rulePaths, "rules", "custom rule file or directory (repeatable; "+custom.DefaultDir+" and $K8S_GUARDIAN_RULES are loaded automatically)")
+	fs.StringVar(&f.configPath, "config", "", "config file (default: "+config.Names[0]+" in the working directory, if present)")
 }
 
 func (f *flags) aiFlags(fs *flag.FlagSet, help string) {
@@ -192,19 +243,65 @@ func (f *flags) cluster(fs *flag.FlagSet) {
 
 // options builds rule options including custom rules.
 func (f *flags) options() (rules.Options, error) {
-	opts := rules.NewOptions(f.skip)
+	c, err := f.config()
+	if err != nil {
+		return rules.Options{}, err
+	}
+	opts := rules.NewOptions(strings.Join(append([]string{f.skip}, c.Skip...), ","))
 	opts.UnsafeFixes = f.unsafeFixes
 	paths := []string{custom.DefaultDir}
 	if env := os.Getenv("K8S_GUARDIAN_RULES"); env != "" {
 		paths = append(paths, filepath.SplitList(env)...)
 	}
+	paths = append(paths, c.Rules...)
 	paths = append(paths, f.rulePaths...)
 	cr, err := custom.Load(paths)
 	if err != nil {
 		return opts, fmt.Errorf("custom rules: %w", err)
 	}
 	opts.Custom = cr
+	if err := f.severityOverrides(c, opts); err != nil {
+		return opts, err
+	}
 	return opts, nil
+}
+
+// severityOverrides validates the config's severity map against every known
+// rule, so a typo is an error instead of a silently ignored setting.
+func (f *flags) severityOverrides(c *config.Config, opts rules.Options) error {
+	if len(c.Severity) == 0 {
+		return nil
+	}
+	known := map[string]bool{}
+	for _, r := range append(append(opts.Rules(), live.Rules...), diff.Rules...) {
+		known[strings.ToLower(r.ID)], known[strings.ToLower(r.Name)] = true, true
+	}
+	f.severity = map[string]rules.Severity{}
+	for k, v := range c.Severity {
+		if !known[strings.ToLower(k)] {
+			return fmt.Errorf("config %s: severity: unknown rule %q", c.Path, k)
+		}
+		s, err := rules.ParseSeverity(v)
+		if err != nil {
+			return fmt.Errorf("config %s: severity %s: %w", c.Path, k, err)
+		}
+		f.severity[strings.ToLower(k)] = s
+	}
+	return nil
+}
+
+// applySeverity rewrites the severity of findings the config overrides.
+func (f *flags) applySeverity(fs []rules.Finding) {
+	if len(f.severity) == 0 {
+		return
+	}
+	for i := range fs {
+		if s, ok := f.severity[strings.ToLower(fs[i].RuleID)]; ok {
+			fs[i].Severity = s
+		} else if s, ok := f.severity[strings.ToLower(fs[i].Rule)]; ok {
+			fs[i].Severity = s
+		}
+	}
 }
 
 // addInputs merges positional paths and -k directories into f.files.
@@ -216,16 +313,35 @@ func (f *flags) addInputs(pos []string) error {
 		}
 		f.files = append(f.files, k)
 	}
+	if len(f.helmValues)+len(f.helmSet) > 0 {
+		charts := 0
+		for _, p := range f.files {
+			if manifest.IsChart(p) {
+				charts++
+			}
+		}
+		if charts == 0 {
+			return errors.New("--values and --set need a Helm chart directory passed with -f")
+		}
+	}
 	return nil
 }
 
-func loadFiles(paths []string, warn io.Writer) ([]*manifest.File, error) {
+func (f *flags) loadOptions() manifest.LoadOptions {
+	o := manifest.LoadOptions{HelmValues: f.helmValues, HelmSet: f.helmSet}
+	if c, err := f.config(); err == nil && len(c.Exclude) > 0 {
+		o.Exclude = c.Excluded
+	}
+	return o
+}
+
+func loadFiles(paths []string, opts manifest.LoadOptions, warn io.Writer) ([]*manifest.File, error) {
 	if len(paths) == 0 {
 		return nil, errors.New("no input: pass -f <file|dir|-> or -k <kustomize dir>")
 	}
 	var loaded []*manifest.File
 	for _, p := range paths {
-		fl, warnings, err := manifest.LoadWithWarnings(p)
+		fl, warnings, err := manifest.LoadWith(p, opts)
 		if err != nil {
 			return nil, err
 		}

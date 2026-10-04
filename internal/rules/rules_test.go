@@ -276,3 +276,85 @@ spec:
 		t.Errorf("probes not required on a long-running pod: %v", got)
 	}
 }
+
+func TestHighAvailabilityHonoursHPA(t *testing.T) {
+	const deploy = `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: shop}
+spec:
+  template:
+    spec:
+      containers: [{name: web, image: nginx:1.27}]
+`
+	hpa := func(min string) string {
+		return deploy + `---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: web, namespace: shop}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: web}
+  ` + min + `
+  maxReplicas: 10
+`
+	}
+	cases := []struct{ name, doc, want string }{
+		{"no replicas, no HPA", deploy, "spec.replicas is not set"},
+		{"HPA with minReplicas 3", hpa("minReplicas: 3"), ""},
+		{"HPA with minReplicas 1", hpa("minReplicas: 1"), "minReplicas 1"},
+		{"HPA without minReplicas", hpa(""), "minReplicas 1"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := strings.Join(messages(validateDoc(t, c.doc), "KG015"), "; ")
+			if c.want == "" && got != "" || !strings.Contains(got, c.want) {
+				t.Errorf("KG015 = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+func TestArgoRollout(t *testing.T) {
+	const rollout = `apiVersion: %s
+kind: Rollout
+metadata: {name: web}
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers: [{name: web, image: nginx:1.27}]
+`
+	got := ids(validateDoc(t, fmt.Sprintf(rollout, "argoproj.io/v1alpha1")))
+	for _, id := range []string{"KG001", "KG002", "KG003", "KG008"} {
+		if got[id] == 0 {
+			t.Errorf("expected %s for an Argo Rollout, got %v", id, got)
+		}
+	}
+	if got["KG015"] != 0 {
+		t.Errorf("3 replicas reported as not highly available: %v", got)
+	}
+	// Another CRD that happens to be called Rollout is not a workload.
+	if got := ids(validateDoc(t, fmt.Sprintf(rollout, "example.com/v1"))); len(got) != 0 {
+		t.Errorf("findings for a foreign Rollout kind: %v", got)
+	}
+}
+
+func TestRBACWildcard(t *testing.T) {
+	fs := validateDoc(t, `apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata: {name: broad}
+rules:
+  - {apiGroups: [""], resources: ["*"], verbs: ["*"]}
+  - {apiGroups: [apps], resources: [deployments], verbs: [get, list]}
+  - {apiGroups: [""], resources: [pods], verbs: ["*"]}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata: {name: narrow}
+rules:
+  - {apiGroups: [""], resources: [configmaps], verbs: [get]}
+`)
+	got := messages(fs, "KG018")
+	if len(got) != 1 || got[0] != `grants "*" verbs in rules[0,2] and "*" resources in rules[0]` {
+		t.Errorf("KG018 = %q", got)
+	}
+}

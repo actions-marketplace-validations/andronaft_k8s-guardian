@@ -2,10 +2,12 @@ package rules
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"gopkg.in/yaml.v3"
 
+	"github.com/andronaft/k8s-guardian/internal/manifest"
 	"github.com/andronaft/k8s-guardian/internal/yamlx"
 )
 
@@ -277,22 +279,45 @@ var All = []*Rule{
 	},
 	{
 		ID: "KG015", Name: "high-availability", Severity: Info,
-		Description: "Deployments and StatefulSets should run at least 2 replicas for availability.",
-		Pod: func(t *Target) string {
-			k := t.Obj.Kind()
-			if k != "Deployment" && k != "StatefulSet" {
-				return ""
+		Description: "Deployments and StatefulSets should run at least 2 replicas (or an HPA with minReplicas >= 2) for availability.",
+		Resource: func(o *manifest.Object, all []*manifest.Object) []string {
+			k := o.Kind()
+			if k != "Deployment" && k != "StatefulSet" && k != "Rollout" {
+				return nil
 			}
-			r := yamlx.Path(t.Obj.Root, "spec", "replicas")
+			// An HorizontalPodAutoscaler decides the replica count.
+			if hpa := findHPA(o, all); hpa != nil {
+				min := yamlx.String(hpa.Root, "spec", "minReplicas")
+				if min == "" {
+					min = "1" // the API default
+				}
+				if n, err := strconv.Atoi(min); err == nil && n < 2 {
+					return []string{fmt.Sprintf("HorizontalPodAutoscaler %s has minReplicas %d", hpa.Name(), n)}
+				}
+				return nil
+			}
+			r := yamlx.Path(o.Root, "spec", "replicas")
 			if r == nil {
-				return "spec.replicas is not set (defaults to 1)"
+				return []string{"spec.replicas is not set (defaults to 1)"}
 			}
 			if r.Value == "0" || r.Value == "1" {
-				return fmt.Sprintf("spec.replicas is %s", r.Value)
+				return []string{fmt.Sprintf("spec.replicas is %s", r.Value)}
 			}
-			return ""
+			return nil
 		},
 	},
+}
+
+// findHPA returns the HorizontalPodAutoscaler in all that scales o.
+func findHPA(o *manifest.Object, all []*manifest.Object) *manifest.Object {
+	for _, h := range all {
+		if h.Kind() == "HorizontalPodAutoscaler" && h.Namespace() == o.Namespace() &&
+			yamlx.String(h.Root, "spec", "scaleTargetRef", "kind") == o.Kind() &&
+			yamlx.String(h.Root, "spec", "scaleTargetRef", "name") == o.Name() {
+			return h
+		}
+	}
+	return nil
 }
 
 func isPrivileged(c *Container) bool {

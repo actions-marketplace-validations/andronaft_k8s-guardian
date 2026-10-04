@@ -3,6 +3,7 @@ package cost
 import (
 	"math"
 	"os"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -46,4 +47,22 @@ func estimate(t *testing.T, doc string) []*Workload {
 		t.Fatal(err)
 	}
 	return Estimate(f.Objects, Pricing{CPUHour: 0.03, GiBHour: 0.004})
+}
+
+func TestRolloutCost(t *testing.T) {
+	ws := estimate(t, `apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata: {name: web, namespace: shop}
+spec:
+  replicas: 3
+  template:
+    spec:
+      containers: [{name: web, image: nginx:1.27, resources: {requests: {cpu: "1", memory: 1Gi}}}]
+`)
+	if len(ws) != 1 || ws[0].MinReplicas != 3 {
+		t.Fatalf("unexpected estimate: %+v", ws)
+	}
+	if got := PodRegex("Rollout", "web"); !regexp.MustCompile("^" + got + "$").MatchString("web-7c5ddbdf54-x2b4k") {
+		t.Errorf("rollout pod regex %q does not match", got)
+	}
 }

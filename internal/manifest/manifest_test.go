@@ -111,3 +111,10 @@ func TestEncodeFallsBackForUnusualStreams(t *testing.T) {
 		t.Errorf("documents lost:\n%s", got)
 	}
 }
+
+func TestHelmArgsCannotInjectFlags(t *testing.T) {
+	got := strings.Join(HelmArgs("chart", LoadOptions{HelmValues: []string{"--post-renderer=/bin/sh"}, HelmSet: []string{"a=b"}}), " ")
+	if got != "template k8s-guardian chart --values=--post-renderer=/bin/sh --set=a=b" {
+		t.Errorf("unexpected helm args: %s", got)
+	}
+}
