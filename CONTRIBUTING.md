@@ -2,6 +2,8 @@
 
 Thanks for helping make Kubernetes deployments safer! 🛡️
 
+By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
+
 ## Development
 
 ```bash
