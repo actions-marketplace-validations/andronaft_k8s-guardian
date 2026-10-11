@@ -4,6 +4,12 @@ Thanks for helping make Kubernetes deployments safer! 🛡️
 
 By taking part you agree to follow the [Code of Conduct](CODE_OF_CONDUCT.md).
 
+## Where to start
+
+The [roadmap](docs/roadmap.md) lists planned work by milestone. Issues labelled
+[good first issue](https://github.com/andronaft/k8s-guardian/issues?q=is%3Aopen+label%3A%22good+first+issue%22)
+have pointers to the code. For larger changes, open an issue first.
+
 ## Development
 
 ```bash
