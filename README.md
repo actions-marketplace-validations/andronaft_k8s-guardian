@@ -78,6 +78,8 @@ Binaries for Linux, macOS and Windows are on the [releases page](https://github.
 
 ## Quick start
 
+New here? **[Try it](docs/try-it.md)** walks through everything with the examples in this repository, from an offline run to enforcing the rules in a local kind cluster.
+
 ```bash
 k8s-guardian check -f k8s/                        # check files, directories, Helm charts, Kustomize
 k8s-guardian check -f k8s/ --fix                  # apply the safe fixes in place
@@ -115,15 +117,17 @@ k8s-guardian was run against 30 popular Helm charts (ingress-nginx, kube-prometh
 
 ## Documentation
 
+* [Try it](docs/try-it.md): a hands-on tour, offline and with a local cluster
 * [Checking and fixing](docs/check.md): inputs, fixes, built-in rules, ignoring findings
 * [Configuration](docs/configuration.md): `.k8s-guardian.yaml`, baseline, environment
 * [Live cluster checks](docs/live.md) · [Breaking-change diff](docs/diff.md) · [Enforcing in the cluster](docs/enforce.md)
 * [Custom rules](docs/custom-rules.md) · [CI integration](docs/ci.md) · [MCP server](docs/mcp.md) · [AI features](docs/ai.md)
 * Experimental: [cost](docs/cost.md) · [interactive review](docs/interactive.md)
+* [Roadmap](docs/roadmap.md): what's next and how to help
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for development, the architecture and how to add a rule. Security issues: [SECURITY.md](SECURITY.md). Release notes are on the [releases page](https://github.com/andronaft/k8s-guardian/releases).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development, the architecture and how to add a rule, and the [roadmap](docs/roadmap.md) for what's planned. [Good first issues](https://github.com/andronaft/k8s-guardian/issues?q=is%3Aopen+label%3A%22good+first+issue%22) come with pointers to the code. Security issues: [SECURITY.md](SECURITY.md). Release notes are on the [releases page](https://github.com/andronaft/k8s-guardian/releases).
 
 ## License
 

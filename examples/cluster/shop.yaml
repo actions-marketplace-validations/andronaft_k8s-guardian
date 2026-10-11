@@ -1,0 +1,29 @@
+# A namespace with a ResourceQuota and a LimitRange, to try `check --live`
+# against a local cluster (kind, minikube, k3d). See docs/try-it.md.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: shop
+---
+apiVersion: v1
+kind: ResourceQuota
+metadata:
+  name: shop-compute
+  namespace: shop
+spec:
+  hard:
+    requests.cpu: "12"
+    requests.memory: 32Gi
+    pods: "30"
+---
+apiVersion: v1
+kind: LimitRange
+metadata:
+  name: shop-limits
+  namespace: shop
+spec:
+  limits:
+    - type: Container
+      max: {cpu: "2", memory: 4Gi}
+      defaultRequest: {cpu: 100m, memory: 128Mi}
+      default: {memory: 256Mi}
