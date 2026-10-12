@@ -8,10 +8,36 @@ them are fixed, and each has a regression test.
 Reproduce it with [`hack/charts/run.sh`](../hack/charts/run.sh)
 (needs `git`, `helm`, `python3` with PyYAML).
 
+## Regression check
+
+The [Charts workflow](../.github/workflows/charts.yml) repeats the run
+weekly, on demand and on every pull request that changes `internal/` or
+`hack/charts/`. It fails when:
+
+* a `--fix` run is not idempotent, in either mode;
+* a chart no longer renders;
+* the number of findings per chart and rule differs from
+  [`hack/charts/expected.json`](../hack/charts/expected.json).
+
+When a change in the findings is intended (a new rule, a fixed false
+positive), update the file in the same pull request, so the difference is
+visible in review:
+
+```bash
+make build
+UPDATE=1 KG=$PWD/bin/k8s-guardian hack/charts/run.sh
+```
+
+Chart repositories are pinned to commits in
+[`hack/charts/refs.txt`](../hack/charts/refs.txt), so upstream changes
+can't fail the check. Bump a ref on purpose and update `expected.json`
+with it.
+
 ## Setup
 
-* Charts are rendered from their Git repositories (default branch, 2 October
-  2026) with `helm template` and **default values**, for Kubernetes 1.33
+* Charts are rendered from their Git repositories (default branches of
+  October 2026, pinned in `hack/charts/refs.txt`) with `helm template` and
+  **default values**, for Kubernetes 1.33
   (Longhorn requires 1.34). Charts that need a value to render at all got
   the minimum: a cluster name, the collector mode, Loki's single-binary
   mode.
