@@ -135,3 +135,129 @@ func TestMissingNamespace(t *testing.T) {
 		t.Errorf("expected LV002 for staging, got %v", got)
 	}
 }
+
+// lv003 checks a workload with the given pod spec lines (indented by 6)
+// on nodes, and returns the LV003 findings and all notes.
+func lv003(t *testing.T, nodes []cluster.Node, kind, spec string) (findings []rules.Finding, notes []string) {
+	t.Helper()
+	doc := "apiVersion: apps/v1\nkind: " + kind + "\nmetadata: {name: app, namespace: prod}\nspec:\n  selector: {matchLabels: {app: app}}\n  template:\n    metadata: {labels: {app: app}}\n    spec:\n" +
+		spec + "      containers:\n        - name: app\n          image: r.io/app:1\n          resources: {requests: {cpu: \"8\", memory: 1Gi}}\n"
+	f, err := manifest.Parse([]byte(doc), "app.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := fake()
+	c.NodeList = nodes
+	res := Check(c, f.Objects, "", rules.NewOptions(""))
+	for _, fd := range res.Findings {
+		if fd.RuleID == "LV003" {
+			findings = append(findings, fd)
+		}
+	}
+	return findings, res.Notes
+}
+
+func TestNodeFitSchedulingConstraints(t *testing.T) {
+	small := cluster.Node{Name: "small", Labels: map[string]string{"pool": "general", "cores": "4"}, AllocCPU: "4", AllocMemory: "16Gi"}
+	gpu := cluster.Node{Name: "gpu", Labels: map[string]string{"pool": "gpu", "cores": "32"}, AllocCPU: "32", AllocMemory: "128Gi",
+		Taints: []cluster.Taint{{Key: "dedicated", Value: "gpu", Effect: "NoSchedule"}, {Key: "spot", Effect: "PreferNoSchedule"}}}
+	big := cluster.Node{Name: "big", Labels: map[string]string{"pool": "general", "cores": "16"}, AllocCPU: "16", AllocMemory: "64Gi"}
+	cordoned := big
+	cordoned.Name, cordoned.Unschedulable = "cordoned", true
+	affinity := func(terms string) string {
+		return "      affinity:\n        nodeAffinity:\n          requiredDuringSchedulingIgnoredDuringExecution:\n            nodeSelectorTerms:\n" + terms
+	}
+
+	for _, tc := range []struct {
+		name  string
+		nodes []cluster.Node
+		kind  string
+		spec  string
+		want  string // "" = no LV003 finding
+	}{
+		{name: "big enough node is tainted", nodes: []cluster.Node{small, gpu},
+			want: "the largest matching node (small) has 4 allocatable; nodes with enough room are excluded (taint dedicated=gpu:NoSchedule: gpu)"},
+		{name: "taint tolerated", nodes: []cluster.Node{small, gpu},
+			spec: "      tolerations: [{key: dedicated, operator: Equal, value: gpu, effect: NoSchedule}]\n"},
+		{name: "toleration without operator defaults to Equal", nodes: []cluster.Node{small, gpu},
+			spec: "      tolerations: [{key: dedicated, value: gpu}]\n"},
+		{name: "toleration with another value", nodes: []cluster.Node{small, gpu},
+			spec: "      tolerations: [{key: dedicated, value: cpu}]\n", want: "taint dedicated=gpu:NoSchedule: gpu"},
+		{name: "toleration for another effect", nodes: []cluster.Node{small, gpu},
+			spec: "      tolerations: [{key: dedicated, operator: Exists, effect: NoExecute}]\n", want: "taint dedicated=gpu:NoSchedule: gpu"},
+		{name: "Exists with a key", nodes: []cluster.Node{small, gpu},
+			spec: "      tolerations: [{key: dedicated, operator: Exists}]\n"},
+		{name: "Exists without a key tolerates everything", nodes: []cluster.Node{small, gpu},
+			spec: "      tolerations: [{operator: Exists}]\n"},
+		{name: "only tainted nodes", nodes: []cluster.Node{gpu},
+			want: "no node accepts the pod (taint dedicated=gpu:NoSchedule: gpu): pods will stay Pending"},
+		{name: "affinity excludes every node", nodes: []cluster.Node{small, big},
+			spec: affinity("              - matchExpressions: [{key: pool, operator: In, values: [gpu]}]\n"),
+			want: "no node accepts the pod (node affinity: small, big)"},
+		{name: "affinity matches the small node only", nodes: []cluster.Node{small, big},
+			spec: affinity("              - matchExpressions: [{key: cores, operator: Lt, values: [\"8\"]}]\n"),
+			want: "the largest matching node (small) has 4 allocatable; nodes with enough room are excluded (node affinity: big)"},
+		{name: "affinity matches the big node", nodes: []cluster.Node{small, big},
+			spec: affinity("              - matchExpressions: [{key: cores, operator: Gt, values: [\"8\"]}, {key: pool, operator: NotIn, values: [gpu]}]\n")},
+		{name: "terms are ORed", nodes: []cluster.Node{small, big},
+			spec: affinity("              - matchExpressions: [{key: pool, operator: DoesNotExist}]\n              - matchFields: [{key: metadata.name, operator: In, values: [big]}]\n")},
+		{name: "expressions in a term are ANDed", nodes: []cluster.Node{small, big},
+			spec: affinity("              - matchExpressions: [{key: pool, operator: Exists}]\n                matchFields: [{key: metadata.name, operator: NotIn, values: [big]}]\n"),
+			want: "nodes with enough room are excluded (node affinity: big)"},
+		{name: "nodeSelector and affinity both apply", nodes: []cluster.Node{small, gpu},
+			spec: "      nodeSelector: {pool: gpu}\n      tolerations: [{operator: Exists}]\n" + affinity("              - matchExpressions: [{key: cores, operator: Lt, values: [\"8\"]}]\n"),
+			want: "no node accepts the pod (nodeSelector: small; node affinity: gpu)"},
+		{name: "cordoned node", nodes: []cluster.Node{small, cordoned},
+			want: "nodes with enough room are excluded (cordoned: cordoned)"},
+		{name: "nodeName bypasses the scheduler", nodes: []cluster.Node{small, cordoned, gpu},
+			spec: "      nodeName: gpu\n"},
+		{name: "nodeName still needs NoExecute tolerated", nodes: []cluster.Node{small, {Name: "big", AllocCPU: "16", AllocMemory: "64Gi",
+			Taints: []cluster.Taint{{Key: "evict", Effect: "NoExecute"}}}},
+			spec: "      nodeName: big\n", want: "taint evict:NoExecute: big"},
+		{name: "DaemonSets tolerate cordoned nodes", nodes: []cluster.Node{small, cordoned}, kind: "DaemonSet"},
+		{name: "DaemonSet on no node", nodes: []cluster.Node{small, big}, kind: "DaemonSet",
+			spec: "      nodeSelector: {pool: gpu}\n",
+			want: "no node accepts the pod (nodeSelector: small, big): the DaemonSet runs no pods"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			kind := tc.kind
+			if kind == "" {
+				kind = "Deployment"
+			}
+			got, notes := lv003(t, tc.nodes, kind, tc.spec)
+			if len(notes) != 0 {
+				t.Errorf("unexpected notes: %v", notes)
+			}
+			if tc.want == "" {
+				if len(got) != 0 {
+					t.Errorf("expected no LV003, got %q", got[0].Message)
+				}
+				return
+			}
+			if len(got) != 1 || !strings.Contains(got[0].Message, tc.want) {
+				t.Fatalf("expected one LV003 containing %q, got %v", tc.want, got)
+			}
+			if kind == "DaemonSet" && got[0].Severity != rules.Warning {
+				t.Errorf("a DaemonSet that runs nowhere is a warning, got %v", got[0].Severity)
+			}
+		})
+	}
+}
+
+func TestNodeFitUnknownSchedulingFieldsMatch(t *testing.T) {
+	gpu := cluster.Node{Name: "gpu", Labels: map[string]string{"pool": "gpu"}, AllocCPU: "32", AllocMemory: "128Gi",
+		Taints: []cluster.Taint{{Key: "nvidia.com/gpu-count", Value: "8", Effect: "NoSchedule"}}}
+	spec := "      tolerations: [{key: nvidia.com/gpu-count, operator: Gt, value: \"4\"}]\n" +
+		"      affinity:\n        nodeAffinity:\n          requiredDuringSchedulingIgnoredDuringExecution:\n            nodeSelectorTerms:\n" +
+		"              - matchExpressions: [{key: pool, operator: Like, values: [g*]}]\n"
+	got, notes := lv003(t, []cluster.Node{gpu}, "Deployment", spec)
+	if len(got) != 0 {
+		t.Errorf("fields that can't be evaluated must not exclude a node, got %q", got[0].Message)
+	}
+	joined := strings.Join(notes, "\n")
+	for _, want := range []string{`LV003 Deployment/app: toleration operator "Gt" not evaluated`, `node affinity operator "Like" not evaluated`} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("notes miss %q:\n%s", want, joined)
+		}
+	}
+}

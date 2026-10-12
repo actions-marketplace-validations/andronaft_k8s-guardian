@@ -28,6 +28,7 @@ import (
 func (a *App) diff(args []string) (int, error) {
 	var f flags
 	fs := a.flagSet("diff", "diff -f <file|dir|chart> [-n ns] [--context ctx] [flags]")
+	serverSide := fs.Bool("server-side", false, "also send each object to the API server as a server-side apply dry run (nothing is stored; needs patch permission): report objects it would reject and fields that defaulting or mutating webhooks change")
 	f.input(fs)
 	f.output(fs, "text, json, sarif, github, markdown")
 	f.ruleFlags(fs)
@@ -50,15 +51,18 @@ func (a *App) diff(args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
-	if err != nil {
-		return ExitError, err
-	}
 	cl, err := cluster.NewKubectl(f.kubeContext)
 	if err != nil {
 		return ExitError, err
 	}
-	res := diff.Run(cl, objects(files), f.namespace, opts)
+	files, err := f.loadInputs(cl, a.Stderr)
+	if err != nil {
+		return ExitError, err
+	}
+	res := diff.Run(cl, objects(files), f.namespace, opts, *serverSide)
+	for _, n := range res.Notes {
+		fmt.Fprintf(a.Stderr, "note: %s\n", n)
+	}
 	findings := res.Findings()
 	switch f.format {
 	case "json":
@@ -111,7 +115,11 @@ func (a *App) writeDiff(res *diff.Result) {
 				fmt.Fprintf(a.Stdout, "    … and %d more\n", len(o.Changes)-15)
 				break
 			}
-			fmt.Fprintf(a.Stdout, "    %s: %s → %s\n", c.Path, report.Paint("31", c.Old), report.Paint("32", c.New))
+			by := ""
+			if c.Server {
+				by = report.Paint("2", " (by the API server)")
+			}
+			fmt.Fprintf(a.Stdout, "    %s: %s → %s%s\n", c.Path, report.Paint("31", c.Old), report.Paint("32", c.New), by)
 		}
 		for _, fd := range o.Findings {
 			fmt.Fprintf(a.Stdout, "  %s %s  %s\n", report.SeverityLabel(fd.Severity), report.Paint("2", fd.RuleID), fd.Message)
@@ -156,7 +164,7 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
+	files, err := f.loadInputs(nil, a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -344,7 +352,7 @@ func (a *App) runInteractive(f *flags) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
-	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
+	files, err := f.loadInputs(nil, a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -495,7 +503,7 @@ func (a *App) ruleCreate(ctx context.Context, args []string) (int, error) {
 		fmt.Fprintf(a.Stderr, "✏️  wrote %s (%s)\n", path, d.Spec.ID)
 	}
 	if len(f.files) > 0 {
-		files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
+		files, err := f.loadInputs(nil, a.Stderr)
 		if err != nil {
 			return ExitError, err
 		}

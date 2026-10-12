@@ -58,7 +58,9 @@ internal/mcp         MCP stdio server
 3. Add tests (violation, no violation, fix) and a row to the rule table in
    [docs/check.md](docs/check.md).
 4. Run `hack/charts/run.sh` and look at what the rule reports on real charts
-   before calling it done.
+   before calling it done. CI fails until `hack/charts/expected.json` has the
+   new counts: rerun with `UPDATE=1` and commit the file
+   ([docs/real-world-test.md](docs/real-world-test.md#regression-check)).
 
 Policies that are specific to one organisation are better expressed as
 [custom rules](docs/custom-rules.md).

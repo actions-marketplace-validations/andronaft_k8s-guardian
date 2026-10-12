@@ -24,7 +24,7 @@ import (
 var Rules = []*rules.Rule{
 	{ID: "LV001", Name: "api-served", Severity: rules.Error, Description: "The apiVersion must be served by the target cluster (CRD installed, API not removed)."},
 	{ID: "LV002", Name: "namespace-exists", Severity: rules.Error, Description: "The target namespace must exist or be created by the same manifest set."},
-	{ID: "LV003", Name: "node-fit", Severity: rules.Error, Description: "At least one schedulable node (matching nodeSelector) must be able to fit the pod's requests."},
+	{ID: "LV003", Name: "node-fit", Severity: rules.Error, Description: "At least one node the pod can be scheduled on (cordon, nodeSelector, required node affinity, taints) must be able to fit its requests."},
 	{ID: "LV004", Name: "resource-quota", Severity: rules.Error, Description: "The workload must fit into the namespace's remaining ResourceQuota and satisfy its required requests/limits."},
 	{ID: "LV005", Name: "limit-range", Severity: rules.Error, Description: "Container requests/limits must be within the namespace's LimitRange min/max."},
 	{ID: "LV006", Name: "references-exist", Severity: rules.Error, Description: "Referenced ConfigMaps, Secrets, ServiceAccounts, PVCs and PriorityClasses must exist in the cluster or the manifest set."},
@@ -199,53 +199,43 @@ func (ch *checker) workload(t *rules.Target, ns *cluster.Namespace) {
 	if err != nil {
 		ch.note("node capacity", err)
 	}
-	candidates := matchingNodes(t, nodes)
+	p := newPlacement(t)
+	candidates, excluded := p.filter(nodes)
+	for _, u := range p.unknown {
+		if !ch.opts.Enabled(ruleByID("LV003"), t.Obj) {
+			break
+		}
+		ch.res.Notes = append(ch.res.Notes, fmt.Sprintf("LV003 %s: %s not evaluated, nodes treated as matching", t.Obj.Ref(), u))
+	}
 	if err == nil {
-		ch.nodeFit(t, pr, nodes, candidates)
+		ch.nodeFit(t, pr, candidates, excluded)
 	}
 	ch.quota(t, ns, pr, len(candidates))
 }
 
-func matchingNodes(t *rules.Target, nodes []cluster.Node) []cluster.Node {
-	sel := yamlx.Get(t.PodSpec, "nodeSelector")
-	var out []cluster.Node
-	for _, n := range nodes {
-		if n.Unschedulable {
-			continue
-		}
-		ok := true
-		if sel != nil {
-			for i := 0; i+1 < len(sel.Content); i += 2 {
-				if n.Labels[sel.Content[i].Value] != sel.Content[i+1].Value {
-					ok = false
-				}
-			}
-		}
-		if ok {
-			out = append(out, n)
-		}
-	}
-	return out
-}
-
-func (ch *checker) nodeFit(t *rules.Target, pr podRes, nodes, candidates []cluster.Node) {
-	if len(nodes) == 0 {
-		return
-	}
+func (ch *checker) nodeFit(t *rules.Target, pr podRes, candidates []cluster.Node, ex []excluded) {
 	if len(candidates) == 0 {
-		msg := "no schedulable node in the cluster"
-		if sel := yamlx.Get(t.PodSpec, "nodeSelector"); sel != nil {
-			msg = "nodeSelector matches no schedulable node"
+		if len(ex) == 0 {
+			return
 		}
-		ch.add("LV003", t.Obj, "", msg+": pods will stay Pending")
+		msg := "no node accepts the pod (" + describe(ex) + ")"
+		if t.Obj.Kind() == "DaemonSet" {
+			ch.addSev("LV003", t.Obj, "", msg+": the DaemonSet runs no pods", rules.Warning)
+		} else {
+			ch.add("LV003", t.Obj, "", msg+": pods will stay Pending")
+		}
 		return
+	}
+	fits := func(n cluster.Node) (cpu, mem int64, ok bool) {
+		cpu, _ = quantity.MilliCPU(orZero(n.AllocCPU))
+		mem, _ = quantity.Bytes(orZero(n.AllocMemory))
+		return cpu, mem, cpu >= pr.req[cpuKey] && mem >= pr.req[memKey]
 	}
 	var bestCPU, bestMem cluster.Node
 	var maxCPU, maxMem int64
 	for _, n := range candidates {
-		cpu, _ := quantity.MilliCPU(orZero(n.AllocCPU))
-		mem, _ := quantity.Bytes(orZero(n.AllocMemory))
-		if cpu >= pr.req[cpuKey] && mem >= pr.req[memKey] {
+		cpu, mem, ok := fits(n)
+		if ok {
 			return // fits on this node (ignoring current utilisation)
 		}
 		if cpu > maxCPU {
@@ -264,6 +254,15 @@ func (ch *checker) nodeFit(t *rules.Target, pr podRes, nodes, candidates []clust
 	}
 	if len(parts) == 0 {
 		parts = append(parts, fmt.Sprintf("no single node has both %s CPU and %s memory allocatable", quantity.FormatCPU(pr.req[cpuKey]), quantity.FormatBytes(pr.req[memKey])))
+	}
+	var big []excluded
+	for _, e := range ex {
+		if _, _, ok := fits(e.node); ok {
+			big = append(big, e)
+		}
+	}
+	if len(big) > 0 {
+		parts = append(parts, "nodes with enough room are excluded ("+describe(big)+")")
 	}
 	ch.add("LV003", t.Obj, "", "pod "+strings.Join(parts, "; ")+": pods will stay Pending")
 }

@@ -3,8 +3,12 @@ package fsutil
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
+
+// Windows has no Unix permission bits; only the read-only flag maps to Perm.
+var unixModes = runtime.GOOS != "windows"
 
 func TestWriteFileKeepsModeAndIsAtomic(t *testing.T) {
 	dir := t.TempDir()
@@ -15,7 +19,7 @@ func TestWriteFileKeepsModeAndIsAtomic(t *testing.T) {
 	}
 	info, _ := os.Stat(p)
 	data, _ := os.ReadFile(p)
-	if string(data) != "new" || info.Mode().Perm() != 0o640 {
+	if string(data) != "new" || unixModes && info.Mode().Perm() != 0o640 {
 		t.Errorf("got %q mode %v", data, info.Mode().Perm())
 	}
 	entries, _ := os.ReadDir(dir)
@@ -26,7 +30,7 @@ func TestWriteFileKeepsModeAndIsAtomic(t *testing.T) {
 	if err := WriteFile(n, []byte("x")); err != nil {
 		t.Fatal(err)
 	}
-	if info, _ := os.Stat(n); info.Mode().Perm() != NewFileMode {
+	if info, _ := os.Stat(n); unixModes && info.Mode().Perm() != NewFileMode {
 		t.Errorf("new file mode %v", info.Mode().Perm())
 	}
 }
@@ -36,7 +40,9 @@ func TestWriteFileThroughSymlinkKeepsLink(t *testing.T) {
 	target := filepath.Join(dir, "real.yaml")
 	link := filepath.Join(dir, "link.yaml")
 	os.WriteFile(target, []byte("old"), 0o644)
-	os.Symlink("real.yaml", link)
+	if err := os.Symlink("real.yaml", link); err != nil {
+		t.Skipf("symlinks not available: %v", err) // Windows without the privilege
+	}
 	if err := WriteFile(link, []byte("new")); err != nil {
 		t.Fatal(err)
 	}

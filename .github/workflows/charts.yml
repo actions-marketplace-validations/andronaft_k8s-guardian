@@ -1,0 +1,42 @@
+name: Charts
+# Runs k8s-guardian against 30 popular Helm charts pinned in hack/charts and
+# fails if a --fix run is not idempotent or the findings per chart and rule
+# differ from hack/charts/expected.json (docs/real-world-test.md).
+on:
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: &paths
+      - "internal/**"
+      - "hack/charts/**"
+      - "go.mod"
+      - "go.sum"
+      - ".github/workflows/charts.yml"
+  pull_request:
+    paths: *paths
+
+permissions:
+  contents: read
+
+jobs:
+  charts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: Install helm and PyYAML
+        env:
+          HELM_VERSION: v3.19.0
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          curl -sSfL "https://get.helm.sh/helm-${HELM_VERSION}-linux-amd64.tar.gz" | tar xz -C "$RUNNER_TEMP/bin" --strip-components=1 linux-amd64/helm
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+          python3 -c 'import yaml' 2>/dev/null || sudo apt-get install -y -q python3-yaml
+      - run: make build
+      - name: Run against the charts
+        run: KG="$PWD/bin/k8s-guardian" hack/charts/run.sh "$RUNNER_TEMP/charts"

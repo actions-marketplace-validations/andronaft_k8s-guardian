@@ -1,6 +1,8 @@
 package cluster
 
 import (
+	"errors"
+
 	"github.com/andronaft/k8s-guardian/internal/manifest"
 )
 
@@ -14,6 +16,15 @@ type Fake struct {
 	PCs        map[string]bool
 	Objects    map[string]*manifest.Object // "Kind/namespace/name"
 	Usage      map[string]map[string]Usage // "namespace/app-label" -> container -> usage
+	// DryRun answers DryRunApply (nil: the fake can't dry-run).
+	DryRun func(o *manifest.Object, namespace string) (*manifest.Object, error)
+}
+
+func (f *Fake) DryRunApply(o *manifest.Object, namespace string) (*manifest.Object, error) {
+	if f.DryRun == nil {
+		return nil, errors.New("the fake cluster has no dry run")
+	}
+	return f.DryRun(o, namespace)
 }
 
 func (f *Fake) PodUsage(namespace string, selector map[string]string) (map[string]Usage, int, error) {

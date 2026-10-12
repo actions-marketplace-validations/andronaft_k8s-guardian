@@ -157,7 +157,7 @@ func (s *Server) callTool(ctx context.Context, name string, raw json.RawMessage)
 			}
 			return out, false
 		}
-		res := diff.Run(cl, f.Objects, args.Namespace, opts)
+		res := diff.Run(cl, f.Objects, args.Namespace, opts, false) // read-only: no dry run (SECURITY.md)
 		b, _ := json.MarshalIndent(res, "", "  ")
 		return string(b), false
 	case "estimate_cost":

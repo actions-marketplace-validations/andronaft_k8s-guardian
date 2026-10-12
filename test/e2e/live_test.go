@@ -45,6 +45,12 @@ apiVersion: v1
 kind: Node
 metadata: {name: node-a, labels: {pool: general}}
 ---
+apiVersion: v1
+kind: Node
+metadata: {name: node-gpu, labels: {pool: gpu}}
+spec:
+  taints: [{key: dedicated, value: gpu, effect: NoSchedule}]
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata: {name: orders-api, namespace: shop}
@@ -69,11 +75,15 @@ spec:
 
 func TestLiveChecksAndDiffAgainstAPIServer(t *testing.T) {
 	mustKubectl(t, clusterState, "apply", "-f", "-")
-	// No controller-manager: set quota usage and node capacity by hand.
+	// No controller-manager: set quota usage and node capacity by hand, and
+	// remove the not-ready taint the API server puts on new nodes.
+	mustKubectl(t, "", "taint", "nodes", "node-a", "node-gpu", "node.kubernetes.io/not-ready:NoSchedule-")
 	mustKubectl(t, "", "patch", "resourcequota", "shop-compute", "-n", "shop", "--subresource=status", "--type=merge", "-p",
 		`{"status":{"hard":{"requests.cpu":"12","requests.memory":"32Gi","pods":"30"},"used":{"requests.cpu":"3","requests.memory":"6Gi","pods":"5"}}}`)
 	mustKubectl(t, "", "patch", "node", "node-a", "--subresource=status", "--type=merge", "-p",
 		`{"status":{"allocatable":{"cpu":"3920m","memory":"15Gi","pods":"110"},"capacity":{"cpu":"4","memory":"16Gi","pods":"110"}}}`)
+	mustKubectl(t, "", "patch", "node", "node-gpu", "--subresource=status", "--type=merge", "-p",
+		`{"status":{"allocatable":{"cpu":"31","memory":"120Gi","pods":"110"},"capacity":{"cpu":"32","memory":"128Gi","pods":"110"}}}`)
 
 	manifest := "../../examples/costly-app.yaml"
 	code, out := run("check", "-f", manifest, "--live", "--skip", "KG003,KG005,KG006,KG007,KG008,KG009,KG013,KG014,KG016")
@@ -82,7 +92,8 @@ func TestLiveChecksAndDiffAgainstAPIServer(t *testing.T) {
 	}
 	for _, want := range []string{
 		`LV005  container "api": requests.cpu 4 exceeds LimitRange "shop-limits" max 2`,
-		"LV003  pod requests 4 CPU but the largest matching node (node-a) has 3920m allocatable",
+		// node-gpu is big enough, but the pods don't tolerate its taint.
+		"LV003  pod requests 4 CPU but the largest matching node (node-a) has 3920m allocatable; nodes with enough room are excluded (taint dedicated=gpu:NoSchedule: node-gpu)",
 		`needs requests.cpu=15 more (4 replica(s)) but ResourceQuota "shop-compute" in namespace "shop" only has 9 left`,
 	} {
 		if !strings.Contains(out, want) {

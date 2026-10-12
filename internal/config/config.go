@@ -33,6 +33,8 @@ type Config struct {
 	Rules []string `yaml:"rules"`
 	// Baseline is the default for --baseline.
 	Baseline string `yaml:"baseline"`
+	// KubeVersion is the default for --kube-version.
+	KubeVersion string `yaml:"kubeVersion"`
 
 	// Path is the file the config was read from ("" if none).
 	Path string `yaml:"-"`

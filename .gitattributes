@@ -1,0 +1,5 @@
+# LF everywhere, also in Windows checkouts: Go sources and test fixtures are
+# compared byte for byte. CRLF input is covered by dedicated tests.
+* text=auto eol=lf
+*.gif binary
+*.png binary

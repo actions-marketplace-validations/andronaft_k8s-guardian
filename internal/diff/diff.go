@@ -27,6 +27,7 @@ var Rules = []*rules.Rule{
 	{ID: "DF005", Name: "traffic-change", Severity: rules.Warning, Description: "Service selector or port changes move or break traffic for existing clients."},
 	{ID: "DF006", Name: "rollout-risk", Severity: rules.Warning, Description: "Risky rollouts: Recreate strategy downtime, scaling to zero, removed containers or ports."},
 	{ID: "DF007", Name: "rollout-info", Severity: rules.Info, Description: "Informational summary of rollouts, image and replica changes."},
+	{ID: "DF008", Name: "server-rejected", Severity: rules.Error, Description: "With --server-side: the API server rejects the object in a dry run (validation, unknown field, admission policy or webhook, quota)."},
 }
 
 func rule(id string) *rules.Rule {
@@ -43,6 +44,9 @@ type Change struct {
 	Path string `json:"path"`
 	Old  string `json:"old"`
 	New  string `json:"new"`
+	// Server is set for changes only the API server makes (defaulting,
+	// mutating policies and webhooks), found with --server-side.
+	Server bool `json:"server,omitempty"`
 }
 
 // Status of an object compared with the cluster.
@@ -68,6 +72,16 @@ type Object struct {
 type Result struct {
 	ClusterVersion string    `json:"clusterVersion,omitempty"`
 	Objects        []*Object `json:"objects"`
+	Notes          []string  `json:"notes,omitempty"` // checks that could not run
+}
+
+func (r *Result) note(s string) {
+	for _, n := range r.Notes {
+		if n == s {
+			return
+		}
+	}
+	r.Notes = append(r.Notes, s)
 }
 
 // Findings returns all findings across objects.
@@ -79,8 +93,9 @@ func (r *Result) Findings() []rules.Finding {
 	return out
 }
 
-// Run diffs every object against the cluster.
-func Run(c cluster.Cluster, objs []*manifest.Object, namespace string, opts rules.Options) *Result {
+// Run diffs every object against the cluster. With serverSide, every object
+// also goes through a server-side apply dry run (see dryRun).
+func Run(c cluster.Cluster, objs []*manifest.Object, namespace string, opts rules.Options, serverSide bool) *Result {
 	res := &Result{}
 	res.ClusterVersion, _ = c.Version()
 	if namespace == "" {
@@ -102,6 +117,9 @@ func Run(c cluster.Cluster, objs []*manifest.Object, namespace string, opts rule
 		switch {
 		case errors.Is(err, cluster.ErrNotFound):
 			d.Status = New
+			if serverSide {
+				a.dryRun(c, res)
+			}
 			continue
 		case err != nil:
 			d.Status, d.Error = Unknown, err.Error()
@@ -117,6 +135,9 @@ func Run(c cluster.Cluster, objs []*manifest.Object, namespace string, opts rule
 		}
 		a.live = live
 		a.compare()
+		if serverSide {
+			a.dryRun(c, res)
+		}
 	}
 	return res
 }
@@ -179,7 +200,7 @@ func walk(local, live *yaml.Node, path string, out *[]Change) {
 	switch local.Kind {
 	case yaml.MappingNode:
 		if live == nil || live.Kind != yaml.MappingNode {
-			*out = append(*out, Change{path, render(live), render(local)})
+			*out = append(*out, change(path, render(live), render(local)))
 			return
 		}
 		for i := 0; i+1 < len(local.Content); i += 2 {
@@ -191,7 +212,7 @@ func walk(local, live *yaml.Node, path string, out *[]Change) {
 		}
 	case yaml.SequenceNode:
 		if live == nil || live.Kind != yaml.SequenceNode {
-			*out = append(*out, Change{path, render(live), render(local)})
+			*out = append(*out, change(path, render(live), render(local)))
 			return
 		}
 		if namedList(local) && namedList(live) {
@@ -203,13 +224,13 @@ func walk(local, live *yaml.Node, path string, out *[]Change) {
 			}
 			for _, it := range live.Content {
 				if name := yamlx.String(it, "name"); !seen[name] {
-					*out = append(*out, Change{fmt.Sprintf("%s[%s]", path, name), "present", "<removed>"})
+					*out = append(*out, change(fmt.Sprintf("%s[%s]", path, name), "present", "<removed>"))
 				}
 			}
 			return
 		}
 		if len(local.Content) != len(live.Content) {
-			*out = append(*out, Change{path, render(live), render(local)})
+			*out = append(*out, change(path, render(live), render(local)))
 			return
 		}
 		for i := range local.Content {
@@ -220,13 +241,17 @@ func walk(local, live *yaml.Node, path string, out *[]Change) {
 			if local.Tag == "!!null" {
 				return
 			}
-			*out = append(*out, Change{path, "<none>", local.Value})
+			*out = append(*out, change(path, "<none>", local.Value))
 			return
 		}
 		if live.Kind != yaml.ScalarNode || !sameScalar(local.Value, live.Value) {
-			*out = append(*out, Change{path, render(live), local.Value})
+			*out = append(*out, change(path, render(live), local.Value))
 		}
 	}
+}
+
+func change(path, old, new string) Change {
+	return Change{Path: path, Old: old, New: new}
 }
 
 func byName(seq *yaml.Node, name string) *yaml.Node {
@@ -409,6 +434,66 @@ func (a *analysis) rollout() {
 		}
 	}
 }
+
+// dryRun sends the object to the API server as a server-side apply dry run.
+// A refusal is DF008. For existing objects, fields the server would change
+// beyond the local ones (defaulting, mutating policies and webhooks) are
+// added to the changes. Anything that keeps the dry run from running (RBAC,
+// a namespace or CRD created by the same set, a webhook without dry-run
+// support) is a note, never a finding.
+func (a *analysis) dryRun(c cluster.Cluster, res *Result) {
+	dry, err := c.DryRunApply(a.obj, a.d.Namespace)
+	var rej *cluster.Rejection
+	switch {
+	case errors.As(err, &rej):
+		msg := rej.Message
+		if a.obj.Kind() == "Secret" {
+			msg = "details hidden, as they can contain secret values (run kubectl apply --dry-run=server to see them)"
+		}
+		a.add("DF008", "the API server rejects it in a dry run: "+msg+": apply will fail")
+		return
+	case errors.Is(err, cluster.ErrForbidden):
+		res.note(fmt.Sprintf("server-side dry run of %s objects skipped: RBAC doesn't allow it (a dry run needs the patch permission)", a.obj.Kind()))
+		return
+	case errors.Is(err, cluster.ErrNotFound):
+		res.note(fmt.Sprintf("server-side dry run of %s skipped: %s", a.obj.Ref(), strings.TrimPrefix(err.Error(), cluster.ErrNotFound.Error()+": ")))
+		return
+	case err != nil:
+		res.note(fmt.Sprintf("server-side dry run of %s failed: %v", a.obj.Ref(), err))
+		return
+	case a.live == nil:
+		return
+	}
+	known := map[string]bool{}
+	for _, ch := range a.d.Changes {
+		known[ch.Path] = true
+	}
+	var server []Change
+	walk(dry.Root, a.live.Root, "", &server)
+	var template []string
+	for _, ch := range server {
+		if known[ch.Path] {
+			continue
+		}
+		ch.Server = true
+		a.d.Changes = append(a.d.Changes, ch)
+		if strings.HasPrefix(ch.Path, "spec.template.") {
+			template = append(template, ch.Path)
+		}
+	}
+	if a.obj.Kind() == "Secret" {
+		redact(a.d.Changes)
+	}
+	if a.d.Status == Unchanged && len(a.d.Changes) > 0 {
+		a.d.Status = Changed
+	}
+	if _, _, local := a.changed("spec", "template"); len(template) > 0 && !local && rollsOut[a.obj.Kind()] {
+		a.add("DF007", "the API server changes the pod template ("+strings.Join(template, ", ")+"): applying triggers a rolling restart")
+	}
+}
+
+// rollsOut lists the kinds that replace their pods when the template changes.
+var rollsOut = map[string]bool{"Deployment": true, "StatefulSet": true, "DaemonSet": true, "Rollout": true}
 
 func hasPortName(c *yaml.Node, name string) bool {
 	for _, p := range yamlx.Items(yamlx.Get(c, "ports")) {

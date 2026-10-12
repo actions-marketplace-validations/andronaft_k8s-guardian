@@ -39,3 +39,19 @@ func TestFilterMissingBaseline(t *testing.T) {
 		t.Errorf("expected a hint to create the baseline, got %v", err)
 	}
 }
+
+// A baseline written on Linux must match on Windows and vice versa.
+func TestFilterIgnoresPathSeparators(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "base.json")
+	recorded := finding("KG001", "missing requests", 10)
+	recorded.Source = "k8s/app.yaml"
+	if err := Write(path, []rules.Finding{recorded}); err != nil {
+		t.Fatal(err)
+	}
+	now := finding("KG001", "missing requests", 12)
+	now.Source = filepath.Join("k8s", "app.yaml") // k8s\app.yaml on Windows
+	left, hidden, err := Filter(path, []rules.Finding{now})
+	if err != nil || hidden != 1 || len(left) != 0 {
+		t.Errorf("hidden=%d left=%v err=%v", hidden, left, err)
+	}
+}
