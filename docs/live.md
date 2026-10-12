@@ -19,7 +19,7 @@ examples/costly-app.yaml  Deployment/orders-api
 |----|-------|
 | LV001 | apiVersion served by the cluster (CRD installed? API removed in this version?) |
 | LV002 | Namespace exists, or is created by the same manifest set |
-| LV003 | Some schedulable node matching `nodeSelector` can fit the pod's requests |
+| LV003 | Some node the pod can be scheduled on can fit its requests. Like the scheduler, it skips cordoned nodes, nodes that don't match `nodeSelector` or required node affinity, and nodes with a `NoSchedule`/`NoExecute` taint the pod doesn't tolerate, and the message names which nodes were excluded and why |
 | LV004 | Enough ResourceQuota is left for the *delta* against what is already running, and quota-mandated requests/limits are set (LimitRange defaults are taken into account) |
 | LV005 | Requests/limits within LimitRange min/max |
 | LV006 | Referenced ConfigMaps, Secrets, ServiceAccounts, PVCs and PriorityClasses exist in the cluster or in the manifest set |
@@ -27,4 +27,11 @@ examples/costly-app.yaml  Deployment/orders-api
 
 Everything is read-only (`kubectl get`). Checks that RBAC doesn't allow are skipped with a note.
 
-**Limits.** LV003 looks at allocatable resources and `nodeSelector`. It does not model taints and tolerations, affinity, topology spread or how full each node already is, so "fits" means "a matching node is big enough", not "the scheduler will place it".
+```text
+✖ error   LV003  pod requests 8 CPU but the largest matching node (node-a) has 3920m allocatable;
+                 nodes with enough room are excluded (taint dedicated=gpu:NoSchedule: gpu-1): pods will stay Pending
+```
+
+DaemonSet pods tolerate cordoned and not-ready nodes, as the DaemonSet controller adds those tolerations. Pods with `nodeName` bypass the scheduler, so for them only `NoExecute` taints count. A DaemonSet that no node accepts is a warning ("runs no pods"), because it creates no pods rather than Pending ones.
+
+**Limits.** LV003 compares requests with each node's allocatable resources. It doesn't model how full each node already is, preferred affinity, pod affinity and anti-affinity, or topology spread, so "fits" means "a node the pod may be scheduled on is big enough", not "the scheduler will place it now". Fields it can't evaluate (a toleration or affinity operator it doesn't know, `matchFields` other than `metadata.name`) count as matching and are reported in a note, so a node is never excluded by mistake.

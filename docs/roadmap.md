@@ -1,6 +1,6 @@
 # Roadmap
 
-The plan lives in [GitHub milestones](https://github.com/andronaft/k8s-guardian/milestones) and issues. This page explains the priorities. Release notes for what already shipped are on the [releases page](https://github.com/andronaft/k8s-guardian/releases).
+The plan lives in [GitHub milestones](https://github.com/andronaft/k8s-guardian/milestones) and issues. This page explains the priorities. Release notes for what already shipped are on the [releases page](https://github.com/andronaft/k8s-guardian/releases). Items marked *done* are on `main` and ship with the next release.
 
 **Guiding principle:** a finding people can't trust is worse than no finding. Accuracy on real manifests comes before new features, and every new rule is run against [30 real Helm charts](real-world-test.md) before it ships.
 
@@ -11,12 +11,12 @@ Make the existing checks right in more situations, and make adoption in CI easy.
 | Issue | |
 |-------|---|
 | [#5](https://github.com/andronaft/k8s-guardian/issues/5) | GitHub Action: inputs for config, baseline and Helm values *(good first issue)* |
-| [#6](https://github.com/andronaft/k8s-guardian/issues/6) | `--live`: taints, tolerations and node affinity in LV003 |
+| [#6](https://github.com/andronaft/k8s-guardian/issues/6) | `--live`: taints, tolerations and node affinity in LV003 *(done)* |
 | [#7](https://github.com/andronaft/k8s-guardian/issues/7) | `diff --server-side`: include defaulting and mutating webhooks |
-| [#8](https://github.com/andronaft/k8s-guardian/issues/8) | KG017: API removals after Kubernetes 1.32 *(help wanted)* |
-| [#9](https://github.com/andronaft/k8s-guardian/issues/9) | Run the 30-chart test on a schedule and fail on regressions |
-| [#10](https://github.com/andronaft/k8s-guardian/issues/10) | Unit tests on macOS and Windows |
-| [#11](https://github.com/andronaft/k8s-guardian/issues/11) | Helm: `--kube-version`, and the cluster's version with `--live` |
+| [#8](https://github.com/andronaft/k8s-guardian/issues/8) | KG017: API removals after Kubernetes 1.32 *(done)* |
+| [#9](https://github.com/andronaft/k8s-guardian/issues/9) | Run the 30-chart test on a schedule and fail on regressions *(done)* |
+| [#10](https://github.com/andronaft/k8s-guardian/issues/10) | Unit tests on macOS and Windows *(done)* |
+| [#11](https://github.com/andronaft/k8s-guardian/issues/11) | Helm: `--kube-version`, and the cluster's version with `--live` *(done)* |
 
 ## Then: [v0.8.0](https://github.com/andronaft/k8s-guardian/milestone/2), coverage
 

@@ -22,13 +22,29 @@ import (
 // ErrNotFound is returned by Get when an object does not exist.
 var ErrNotFound = errors.New("not found")
 
-// Node is a schedulable node's capacity.
+// Node is a node's capacity and what restricts scheduling onto it.
 type Node struct {
 	Name          string
 	Labels        map[string]string
 	AllocCPU      string // quantity
 	AllocMemory   string // quantity
 	Unschedulable bool
+	Taints        []Taint
+}
+
+// Taint is a node taint.
+type Taint struct {
+	Key    string `json:"key"`
+	Value  string `json:"value"`
+	Effect string `json:"effect"`
+}
+
+func (t Taint) String() string {
+	s := t.Key
+	if t.Value != "" {
+		s += "=" + t.Value
+	}
+	return s + ":" + t.Effect
 }
 
 // Quota is a ResourceQuota with its hard limits and current usage.
@@ -214,7 +230,8 @@ func (k *Kubectl) Nodes() ([]Node, error) {
 		var l list[struct {
 			Metadata meta `json:"metadata"`
 			Spec     struct {
-				Unschedulable bool `json:"unschedulable"`
+				Unschedulable bool    `json:"unschedulable"`
+				Taints        []Taint `json:"taints"`
 			} `json:"spec"`
 			Status struct {
 				Allocatable map[string]string `json:"allocatable"`
@@ -227,7 +244,7 @@ func (k *Kubectl) Nodes() ([]Node, error) {
 		for _, n := range l.Items {
 			nodes = append(nodes, Node{Name: n.Metadata.Name, Labels: n.Metadata.Labels,
 				AllocCPU: n.Status.Allocatable["cpu"], AllocMemory: n.Status.Allocatable["memory"],
-				Unschedulable: n.Spec.Unschedulable})
+				Unschedulable: n.Spec.Unschedulable, Taints: n.Spec.Taints})
 		}
 		return nodes, nil
 	})
