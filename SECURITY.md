@@ -16,14 +16,19 @@ from an LLM (`--ai`). It is designed so that none of these can escalate:
 |-------|------------|
 | Manifest values that reach `kubectl` (names, namespaces, labels, kinds) | Validated against Kubernetes naming rules before any call; values are passed as `--flag=value` or `kind/name`, never as bare arguments. A manifest can't inject flags such as `--server=` (which would send your credentials elsewhere). |
 | MCP tool arguments (`audit_cluster_resource`, `check_live`, `diff_cluster`) | Same validation; the MCP server only runs read-only `kubectl get/top`. |
-| Secrets | Never sent to the Claude API (`--ai` refuses files with a `Secret`, the TUI skips them). `diff` compares Secret data but prints `(redacted)`, and `audit` drops Secret data. |
+| Secrets | Never sent to the Claude API (`--ai` refuses files with a `Secret`, the TUI skips them). `diff` compares Secret data but prints `(redacted)`, and doesn't print the API server's messages about Secrets (`--server-side`); `audit` drops Secret data. |
 | LLM answers (`--fix --ai`, TUI, `rule create`) | The fixed manifest must contain exactly the same resources, must not introduce new errors (prompt-injection guard), and is re-validated. Generated rule names are restricted to DNS labels, so they can't write files outside the rules directory. |
 | Unrelated/broken YAML in a repository | Skipped with a warning while walking directories (a broken Kubernetes manifest still fails). Aliases are not expanded, so YAML bombs are harmless. |
 
 ## Design notes
 
 - k8s-guardian only **reads** from clusters (`kubectl get`, `kubectl top`).
-  It never applies changes; `--fix` edits local files or prints YAML.
+  It never applies changes; `--fix` edits local files or prints YAML. The
+  one exception you opt into is `diff --server-side`: it sends each
+  manifest (on stdin) to the API server as a server-side apply with
+  `--dry-run=server`, which validates and admits it but stores nothing. It
+  needs the patch permission, runs only the admission webhooks that support
+  dry runs, and is not available through MCP.
 - AI features (`--ai`, `rule create`, `use_ai` in MCP) send data to the
   Claude API only when explicitly requested. `cost --ai` sends image names,
   ports, env var *names*, commands and resources, never env values.

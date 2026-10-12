@@ -81,8 +81,9 @@ type StorageClasses struct {
 	Default string
 }
 
-// Cluster is the read-only view k8s-guardian needs. Implemented by Kubectl
-// and by fakes in tests.
+// Cluster is the view of a cluster k8s-guardian needs. Implemented by
+// Kubectl and by fakes in tests. Nothing is ever written: DryRunApply is a
+// dry run.
 type Cluster interface {
 	Version() (string, error)
 	APIVersions() (map[string]bool, error)
@@ -97,6 +98,10 @@ type Cluster interface {
 	// pods matching selector, averaged per container name, and the number
 	// of pods sampled.
 	PodUsage(namespace string, selector map[string]string) (map[string]Usage, int, error)
+	// DryRunApply returns the object the API server would store for a
+	// server-side apply of o, without storing it. A refusal is a
+	// *Rejection, a missing RBAC permission ErrForbidden.
+	DryRunApply(o *manifest.Object, namespace string) (*manifest.Object, error)
 }
 
 // Usage is the observed consumption of a container.
@@ -122,21 +127,29 @@ func NewKubectl(context string) (*Kubectl, error) {
 }
 
 func (k *Kubectl) run(args ...string) ([]byte, error) {
-	if k.Context != "" {
-		args = append(args, "--context="+k.Context)
-	}
-	var stderr bytes.Buffer
-	cmd := exec.Command("kubectl", args...) // #nosec G204 -- no shell; every value is validated by internal/k8sname
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
+	out, msg, err := k.exec(nil, args...)
 	if err != nil {
-		msg := strings.TrimSpace(stderr.String())
 		if strings.Contains(msg, "NotFound") || strings.Contains(msg, "not found") {
 			return nil, fmt.Errorf("%w: %s", ErrNotFound, msg)
 		}
 		return nil, fmt.Errorf("kubectl %s: %s", strings.Join(args, " "), firstLine(msg, err))
 	}
 	return out, nil
+}
+
+// exec runs kubectl with stdin and returns stdout and the trimmed stderr.
+func (k *Kubectl) exec(stdin []byte, args ...string) ([]byte, string, error) {
+	if k.Context != "" {
+		args = append(args, "--context="+k.Context)
+	}
+	var stderr bytes.Buffer
+	cmd := exec.Command("kubectl", args...) // #nosec G204 -- no shell; every value is validated by internal/k8sname
+	cmd.Stderr = &stderr
+	if stdin != nil {
+		cmd.Stdin = bytes.NewReader(stdin)
+	}
+	out, err := cmd.Output()
+	return out, strings.TrimSpace(stderr.String()), err
 }
 
 func firstLine(msg string, err error) string {

@@ -12,7 +12,7 @@ Make the existing checks right in more situations, and make adoption in CI easy.
 |-------|---|
 | [#5](https://github.com/andronaft/k8s-guardian/issues/5) | GitHub Action: inputs for config, baseline and Helm values *(good first issue)* |
 | [#6](https://github.com/andronaft/k8s-guardian/issues/6) | `--live`: taints, tolerations and node affinity in LV003 *(done)* |
-| [#7](https://github.com/andronaft/k8s-guardian/issues/7) | `diff --server-side`: include defaulting and mutating webhooks |
+| [#7](https://github.com/andronaft/k8s-guardian/issues/7) | `diff --server-side`: include defaulting and mutating webhooks *(done)* |
 | [#8](https://github.com/andronaft/k8s-guardian/issues/8) | KG017: API removals after Kubernetes 1.32 *(done)* |
 | [#9](https://github.com/andronaft/k8s-guardian/issues/9) | Run the 30-chart test on a schedule and fail on regressions *(done)* |
 | [#10](https://github.com/andronaft/k8s-guardian/issues/10) | Unit tests on macOS and Windows *(done)* |

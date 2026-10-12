@@ -468,6 +468,7 @@ Existing repository:
 Before you deploy:
   %[1]s diff -f app.yaml -n prod            Compare with the cluster and flag breaking changes
                                             (immutable selectors, removed APIs, downtime, port changes)
+  %[1]s diff -f app.yaml --server-side      ...plus an API server dry run: rejections, webhook changes
   %[1]s cost -f app.yaml [--usage|--prometheus URL] [--ai]
                                             Estimate $/month (experimental); compare with real usage;
                                             Claude right-sizes requests and shows savings
