@@ -21,7 +21,8 @@ spec:
   caveats: |
     Checking local files works offline. Some features need extra setup:
       * --live, audit and diff read the cluster of your current kubeconfig
-        (read-only, via kubectl).
+        (read-only, via kubectl). diff --server-side also runs an API server
+        dry run, which stores nothing but needs the patch permission.
       * --ai and "rule create" call the Anthropic API and need
         ANTHROPIC_API_KEY. Secrets are never sent.
       * cost --usage needs metrics-server or Prometheus (--prometheus URL).
