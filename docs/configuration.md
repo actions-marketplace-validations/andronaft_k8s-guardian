@@ -16,9 +16,10 @@ exclude:                        # skipped when walking directories
   - charts/*/tests
 rules: [policies/]              # custom rule files or directories
 baseline: .k8s-guardian-baseline.json
+kubeVersion: "1.33"             # render Helm charts for this version (default for --kube-version)
 ```
 
-* `check` and `audit` use every key. `diff`, `interactive`, `rules` and `rule create` use `skip`, `severity`, `exclude` and `rules`. `export` uses `rules`.
+* `check` uses every key and `audit` every key that isn't about files. `diff`, `interactive`, `rules` and `rule create` use `skip`, `severity` and `rules`; `exclude` and `kubeVersion` apply wherever files are loaded (also `cost`). `export` uses `rules`.
 * Relative paths are relative to the config file.
 * `exclude` entries are paths or `filepath.Match` patterns (`*` doesn't cross `/`, and there is no `**`). An excluded directory is skipped with everything below it. Inputs passed explicitly with `-f` are always checked.
 * Unknown keys and unknown rules in `severity` are errors, so a typo can't silently turn a setting off.

@@ -118,3 +118,22 @@ func TestHelmArgsCannotInjectFlags(t *testing.T) {
 		t.Errorf("unexpected helm args: %s", got)
 	}
 }
+
+func TestNormalizeKubeVersion(t *testing.T) {
+	for in, want := range map[string]string{
+		"1.33": "v1.33.0", "v1.33": "v1.33.0", "1.33.2": "v1.33.2", "v1.29.4-gke.1043000": "v1.29.4", " v1.30.1+k3s1 ": "v1.30.1",
+	} {
+		if got, err := NormalizeKubeVersion(in); err != nil || got != want {
+			t.Errorf("NormalizeKubeVersion(%q) = %q, %v; want %q", in, got, err, want)
+		}
+	}
+	for _, bad := range []string{"", "latest", "1", "1.x", "--post-renderer=/bin/sh", "1.33;rm"} {
+		if _, err := NormalizeKubeVersion(bad); err == nil {
+			t.Errorf("NormalizeKubeVersion(%q) accepted", bad)
+		}
+	}
+	got := strings.Join(HelmArgs("chart", LoadOptions{KubeVersion: "v1.33.0"}), " ")
+	if got != "template k8s-guardian chart --kube-version=v1.33.0" {
+		t.Errorf("unexpected helm args: %s", got)
+	}
+}

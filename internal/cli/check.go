@@ -62,10 +62,6 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
-	if err != nil {
-		return ExitError, err
-	}
 	var cl cluster.Cluster
 	if f.live {
 		k, err := cluster.NewKubectl(f.kubeContext)
@@ -73,6 +69,10 @@ func (a *App) check(ctx context.Context, args []string) (int, error) {
 			return ExitError, err
 		}
 		cl = k
+	}
+	files, err := f.loadInputs(cl, a.Stderr)
+	if err != nil {
+		return ExitError, err
 	}
 	return a.process(ctx, files, &f, opts, failOn, f.stdout, cl)
 }

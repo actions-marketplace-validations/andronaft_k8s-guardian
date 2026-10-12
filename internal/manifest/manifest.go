@@ -298,6 +298,10 @@ type LoadOptions struct {
 	// `helm template` for a chart given as path itself, not for charts
 	// found while walking a directory.
 	HelmValues, HelmSet []string
+	// KubeVersion is passed to `helm template --kube-version` for every
+	// chart, so .Capabilities and kubeVersion constraints see the target
+	// cluster instead of the version built into helm.
+	KubeVersion string
 	// Exclude, when set, skips files and directories during directory walks.
 	Exclude func(path string) bool
 }
@@ -374,7 +378,7 @@ func LoadWith(path string, o LoadOptions) ([]*File, []string, error) {
 				return fs.SkipDir
 			}
 			if isChart(p) {
-				f, err := renderChart(p, LoadOptions{})
+				f, err := renderChart(p, LoadOptions{KubeVersion: o.KubeVersion})
 				if err != nil {
 					warnings = append(warnings, fmt.Sprintf("skipped Helm chart %s: %v", p, err))
 				} else {
@@ -422,6 +426,22 @@ func isChart(dir string) bool {
 	return err == nil
 }
 
+var kubeVersionRe = regexp.MustCompile(`^v?(\d+)\.(\d+)(?:\.(\d+))?(?:[-+][0-9A-Za-z.+-]*)?$`)
+
+// NormalizeKubeVersion turns "1.33", "v1.33.2" or a provider version such
+// as "v1.29.4-gke.1043000" into "v1.33.0" / "v1.33.2" / "v1.29.4".
+func NormalizeKubeVersion(v string) (string, error) {
+	m := kubeVersionRe.FindStringSubmatch(strings.TrimSpace(v))
+	if m == nil {
+		return "", fmt.Errorf("invalid Kubernetes version %q (want e.g. 1.33 or v1.33.2)", v)
+	}
+	patch := m[3]
+	if patch == "" {
+		patch = "0"
+	}
+	return "v" + m[1] + "." + m[2] + "." + patch, nil
+}
+
 // HelmArgs returns the `helm template` arguments for a chart. Values are
 // passed as --flag=value so none of them can become another helm flag.
 func HelmArgs(dir string, o LoadOptions) []string {
@@ -431,6 +451,9 @@ func HelmArgs(dir string, o LoadOptions) []string {
 	}
 	for _, s := range o.HelmSet {
 		args = append(args, "--set="+s)
+	}
+	if o.KubeVersion != "" {
+		args = append(args, "--kube-version="+o.KubeVersion)
 	}
 	return args
 }

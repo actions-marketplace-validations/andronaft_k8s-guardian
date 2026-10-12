@@ -463,3 +463,40 @@ func TestExportUsesConfigRules(t *testing.T) {
 		t.Errorf("config rules not exported: %d %s\n%s", code, errOut, out)
 	}
 }
+
+func TestHelmKubeVersion(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	chart, _ := filepath.Abs("testdata/chart-kube") // requires Kubernetes ~1.29
+	if code, _, errOut := run(t, "check", "-f", chart); code != ExitError || !strings.Contains(errOut, "kubeVersion") {
+		t.Errorf("without a version the chart should not render: %d %s", code, errOut)
+	}
+	if code, out, errOut := run(t, "check", "-f", chart, "--kube-version", "1.29"); code != ExitOK {
+		t.Errorf("--kube-version 1.29: %d %s%s", code, out, errOut)
+	}
+	if code, _, errOut := run(t, "check", "-f", chart, "--kube-version", "latest"); code != ExitError || !strings.Contains(errOut, "invalid Kubernetes version") {
+		t.Errorf("invalid version accepted: %d %s", code, errOut)
+	}
+	// The config file can set it.
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, ".k8s-guardian.yaml"), []byte("kubeVersion: v1.29.8\n"), 0o600)
+	t.Chdir(dir)
+	if code, out, errOut := run(t, "check", "-f", chart); code != ExitOK {
+		t.Errorf("kubeVersion from the config: %d %s%s", code, out, errOut)
+	}
+}
+
+func TestHelmKubeVersionFromCluster(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	fakeKubectl(t) // reports v1.29.4
+	chart, _ := filepath.Abs("testdata/chart-kube")
+	if code, out, errOut := run(t, "check", "-f", chart, "--live", "--fix", "--stdout"); code == ExitError || !strings.Contains(out, `version: "v1.29.4"`) {
+		t.Errorf("--live should render the chart for the cluster's version: %d %s%s", code, out, errOut)
+	}
+	if code, out, errOut := run(t, "diff", "-f", chart); code == ExitError {
+		t.Errorf("diff should render the chart for the cluster's version: %d %s%s", code, out, errOut)
+	}
+}

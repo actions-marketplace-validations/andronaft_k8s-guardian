@@ -13,6 +13,7 @@ import (
 	"strings"
 
 	"github.com/andronaft/k8s-guardian/internal/ai"
+	"github.com/andronaft/k8s-guardian/internal/cluster"
 	"github.com/andronaft/k8s-guardian/internal/config"
 	"github.com/andronaft/k8s-guardian/internal/custom"
 	"github.com/andronaft/k8s-guardian/internal/diff"
@@ -152,6 +153,7 @@ type flags struct {
 	allNamespaces                   bool
 
 	configPath, baseline string
+	kubeVersion          string
 	updateBaseline       bool
 	cfg                  *config.Config
 	severity             map[string]rules.Severity // overrides by rule ID/name (lower-case)
@@ -216,6 +218,7 @@ func (f *flags) input(fs *flag.FlagSet) {
 	fs.Var(&f.kustomize, "kustomize", "alias for -k")
 	fs.Var(&f.helmValues, "values", "Helm values file for a chart passed with -f (repeatable)")
 	fs.Var(&f.helmSet, "set", "Helm value for a chart passed with -f, e.g. replicaCount=3 (repeatable)")
+	fs.StringVar(&f.kubeVersion, "kube-version", "", "Kubernetes version to render Helm charts for, e.g. 1.33 (default: the config's kubeVersion, then the cluster's version when connected, then helm's)")
 }
 
 func (f *flags) output(fs *flag.FlagSet, formats string) {
@@ -327,12 +330,42 @@ func (f *flags) addInputs(pos []string) error {
 	return nil
 }
 
-func (f *flags) loadOptions() manifest.LoadOptions {
+// loadOptions builds the input options. cl may be nil; when set and no
+// version is configured, charts are rendered for the cluster's version.
+func (f *flags) loadOptions(cl cluster.Cluster) (manifest.LoadOptions, error) {
 	o := manifest.LoadOptions{HelmValues: f.helmValues, HelmSet: f.helmSet}
-	if c, err := f.config(); err == nil && len(c.Exclude) > 0 {
+	c, err := f.config()
+	if err != nil {
+		return o, err
+	}
+	if len(c.Exclude) > 0 {
 		o.Exclude = c.Excluded
 	}
-	return o
+	v := f.kubeVersion
+	if v == "" {
+		v = c.KubeVersion
+	}
+	if v == "" && cl != nil {
+		if cv, err := cl.Version(); err == nil {
+			v = cv
+		}
+	}
+	if v != "" {
+		if o.KubeVersion, err = manifest.NormalizeKubeVersion(v); err != nil {
+			return o, err
+		}
+	}
+	return o, nil
+}
+
+// loadInputs loads f.files; cl (may be nil) supplies the default Kubernetes
+// version for Helm charts.
+func (f *flags) loadInputs(cl cluster.Cluster, warn io.Writer) ([]*manifest.File, error) {
+	opts, err := f.loadOptions(cl)
+	if err != nil {
+		return nil, err
+	}
+	return loadFiles(f.files, opts, warn)
 }
 
 func loadFiles(paths []string, opts manifest.LoadOptions, warn io.Writer) ([]*manifest.File, error) {

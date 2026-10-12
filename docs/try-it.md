@@ -61,7 +61,7 @@ k8s-guardian check -f charts/my-app --values values-prod.yaml         # what you
 k8s-guardian check -f charts/my-app --values values-prod.yaml --set replicaCount=3
 ```
 
-For example, with [podinfo](https://github.com/stefanprodan/podinfo): with default values KG015 reports `spec.replicas is 1`, and with `--set replicaCount=3` it doesn't. Rendering uses your `helm`, so its default Kubernetes version applies to `.Capabilities`.
+For example, with [podinfo](https://github.com/stefanprodan/podinfo): with default values KG015 reports `spec.replicas is 1`, and with `--set replicaCount=3` it doesn't. Add `--kube-version 1.33` to render for a specific Kubernetes version. With `--live`, the cluster's version is used.
 
 ## 5. Against a local cluster
 

@@ -50,11 +50,11 @@ func (a *App) diff(args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
+	cl, err := cluster.NewKubectl(f.kubeContext)
 	if err != nil {
 		return ExitError, err
 	}
-	cl, err := cluster.NewKubectl(f.kubeContext)
+	files, err := f.loadInputs(cl, a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -156,7 +156,7 @@ func (a *App) cost(ctx context.Context, args []string) (int, error) {
 	if len(f.files) == 0 {
 		fs.Usage()
 	}
-	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
+	files, err := f.loadInputs(nil, a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -344,7 +344,7 @@ func (a *App) runInteractive(f *flags) (int, error) {
 	if err != nil {
 		return ExitError, err
 	}
-	files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
+	files, err := f.loadInputs(nil, a.Stderr)
 	if err != nil {
 		return ExitError, err
 	}
@@ -495,7 +495,7 @@ func (a *App) ruleCreate(ctx context.Context, args []string) (int, error) {
 		fmt.Fprintf(a.Stderr, "✏️  wrote %s (%s)\n", path, d.Spec.ID)
 	}
 	if len(f.files) > 0 {
-		files, err := loadFiles(f.files, f.loadOptions(), a.Stderr)
+		files, err := f.loadInputs(nil, a.Stderr)
 		if err != nil {
 			return ExitError, err
 		}
