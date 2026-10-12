@@ -358,3 +358,93 @@ rules:
 		t.Errorf("KG018 = %q", got)
 	}
 }
+
+// TestRemovedAPIsMatchOfficialGuide lists every removal in the official
+// Deprecated API Migration Guide
+// (https://kubernetes.io/docs/reference/using-api/deprecation-guide/, as of
+// kubernetes/website 78de91b, 2026-10-12; its newest section is v1.32).
+// When the guide gets a new release section, add its rows here and to
+// removedAPIs.
+func TestRemovedAPIsMatchOfficialGuide(t *testing.T) {
+	guide := []struct{ apiVersion, kind, removedIn string }{
+		{"flowcontrol.apiserver.k8s.io/v1beta3", "FlowSchema", "1.32"},
+		{"flowcontrol.apiserver.k8s.io/v1beta3", "PriorityLevelConfiguration", "1.32"},
+		{"flowcontrol.apiserver.k8s.io/v1beta2", "FlowSchema", "1.29"},
+		{"flowcontrol.apiserver.k8s.io/v1beta2", "PriorityLevelConfiguration", "1.29"},
+		{"storage.k8s.io/v1beta1", "CSIStorageCapacity", "1.27"},
+		{"flowcontrol.apiserver.k8s.io/v1beta1", "FlowSchema", "1.26"},
+		{"flowcontrol.apiserver.k8s.io/v1beta1", "PriorityLevelConfiguration", "1.26"},
+		{"autoscaling/v2beta2", "HorizontalPodAutoscaler", "1.26"},
+		{"batch/v1beta1", "CronJob", "1.25"},
+		{"discovery.k8s.io/v1beta1", "EndpointSlice", "1.25"},
+		{"events.k8s.io/v1beta1", "Event", "1.25"},
+		{"autoscaling/v2beta1", "HorizontalPodAutoscaler", "1.25"},
+		{"policy/v1beta1", "PodDisruptionBudget", "1.25"},
+		{"policy/v1beta1", "PodSecurityPolicy", "1.25"},
+		{"node.k8s.io/v1beta1", "RuntimeClass", "1.25"},
+		{"admissionregistration.k8s.io/v1beta1", "MutatingWebhookConfiguration", "1.22"},
+		{"admissionregistration.k8s.io/v1beta1", "ValidatingWebhookConfiguration", "1.22"},
+		{"apiextensions.k8s.io/v1beta1", "CustomResourceDefinition", "1.22"},
+		{"apiregistration.k8s.io/v1beta1", "APIService", "1.22"},
+		{"authentication.k8s.io/v1beta1", "TokenReview", "1.22"},
+		{"authorization.k8s.io/v1beta1", "LocalSubjectAccessReview", "1.22"},
+		{"authorization.k8s.io/v1beta1", "SelfSubjectAccessReview", "1.22"},
+		{"authorization.k8s.io/v1beta1", "SubjectAccessReview", "1.22"},
+		{"authorization.k8s.io/v1beta1", "SelfSubjectRulesReview", "1.22"},
+		{"certificates.k8s.io/v1beta1", "CertificateSigningRequest", "1.22"},
+		{"coordination.k8s.io/v1beta1", "Lease", "1.22"},
+		{"extensions/v1beta1", "Ingress", "1.22"},
+		{"networking.k8s.io/v1beta1", "Ingress", "1.22"},
+		{"networking.k8s.io/v1beta1", "IngressClass", "1.22"},
+		{"rbac.authorization.k8s.io/v1beta1", "ClusterRole", "1.22"},
+		{"rbac.authorization.k8s.io/v1beta1", "ClusterRoleBinding", "1.22"},
+		{"rbac.authorization.k8s.io/v1beta1", "Role", "1.22"},
+		{"rbac.authorization.k8s.io/v1beta1", "RoleBinding", "1.22"},
+		{"scheduling.k8s.io/v1beta1", "PriorityClass", "1.22"},
+		{"storage.k8s.io/v1beta1", "CSIDriver", "1.22"},
+		{"storage.k8s.io/v1beta1", "CSINode", "1.22"},
+		{"storage.k8s.io/v1beta1", "StorageClass", "1.22"},
+		{"storage.k8s.io/v1beta1", "VolumeAttachment", "1.22"},
+		{"extensions/v1beta1", "NetworkPolicy", "1.16"},
+		{"extensions/v1beta1", "DaemonSet", "1.16"},
+		{"apps/v1beta2", "DaemonSet", "1.16"},
+		{"extensions/v1beta1", "Deployment", "1.16"},
+		{"apps/v1beta1", "Deployment", "1.16"},
+		{"apps/v1beta2", "Deployment", "1.16"},
+		{"apps/v1beta1", "StatefulSet", "1.16"},
+		{"apps/v1beta2", "StatefulSet", "1.16"},
+		{"extensions/v1beta1", "ReplicaSet", "1.16"},
+		{"apps/v1beta1", "ReplicaSet", "1.16"},
+		{"apps/v1beta2", "ReplicaSet", "1.16"},
+		{"extensions/v1beta1", "PodSecurityPolicy", "1.16"},
+	}
+	for _, g := range guide {
+		r, ok := rules.LookupRemovedAPI(g.apiVersion, g.kind)
+		if !ok {
+			t.Errorf("%s %s (removed in %s) is missing", g.apiVersion, g.kind, g.removedIn)
+			continue
+		}
+		if r.RemovedIn != g.removedIn {
+			t.Errorf("%s %s: removed in %s, the guide says %s", g.apiVersion, g.kind, r.RemovedIn, g.removedIn)
+		}
+	}
+}
+
+// Beta versions gain kinds after older kinds of the same version were
+// removed. These are served today and must not be reported.
+func TestRemovedAPIsDoNotFlagCurrentBetaKinds(t *testing.T) {
+	for _, gk := range [][2]string{
+		{"admissionregistration.k8s.io/v1beta1", "ValidatingAdmissionPolicy"},
+		{"admissionregistration.k8s.io/v1beta1", "ValidatingAdmissionPolicyBinding"},
+		{"admissionregistration.k8s.io/v1beta1", "MutatingAdmissionPolicy"},
+		{"certificates.k8s.io/v1beta1", "ClusterTrustBundle"},
+		{"certificates.k8s.io/v1beta1", "PodCertificateRequest"},
+		{"coordination.k8s.io/v1beta1", "LeaseCandidate"},
+		{"scheduling.k8s.io/v1beta1", "Workload"},
+		{"authentication.k8s.io/v1beta1", "SelfSubjectReview"},
+	} {
+		if r, ok := rules.LookupRemovedAPI(gk[0], gk[1]); ok {
+			t.Errorf("%s %s reported as removed in %s", gk[0], gk[1], r.RemovedIn)
+		}
+	}
+}
