@@ -11,8 +11,8 @@ Reproduce it with [`hack/charts/run.sh`](../hack/charts/run.sh)
 ## Regression check
 
 The [Charts workflow](../.github/workflows/charts.yml) repeats the run
-weekly, on demand and on every pull request that changes `internal/` or
-`hack/charts/`. It fails when:
+weekly, on demand, and on every push to `main` and pull request that
+changes `internal/` or `hack/charts/`. It fails when:
 
 * a `--fix` run is not idempotent, in either mode;
 * a chart no longer renders;
