@@ -137,3 +137,19 @@ func TestNormalizeKubeVersion(t *testing.T) {
 		t.Errorf("unexpected helm args: %s", got)
 	}
 }
+
+func TestEncodeKeepsWindowsLineEndings(t *testing.T) {
+	in := "apiVersion: v1\r\nkind: ConfigMap\r\nmetadata: {name: cfg}\r\ndata: {a: b}\r\n---\r\napiVersion: v1\r\nkind: Pod\r\nmetadata: {name: p}\r\nspec:\r\n  containers: [{name: c, image: nginx}]\r\n"
+	f := parse(t, in)
+	if got := encode(t, f); got != in {
+		t.Fatalf("round trip changed a CRLF file:\n%q", got)
+	}
+	yamlx.Set(yamlx.Path(f.Objects[1].Root, "metadata"), "namespace", yamlx.Str("prod"))
+	got := encode(t, f)
+	if strings.Count(got, "\n") != strings.Count(got, "\r\n") {
+		t.Errorf("mixed line endings after a change:\n%q", got)
+	}
+	if !strings.HasPrefix(got, "apiVersion: v1\r\nkind: ConfigMap\r\nmetadata: {name: cfg}\r\ndata: {a: b}\r\n---\r\n") || !strings.Contains(got, "metadata: {name: p, namespace: prod}\r\n") {
+		t.Errorf("unexpected output:\n%q", got)
+	}
+}

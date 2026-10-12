@@ -335,7 +335,9 @@ func TestWalkNeverFollowsSymlinksOutOfTheRepo(t *testing.T) {
 	secret := []byte("apiVersion: v1\nkind: Pod\nmetadata: {name: private}\nspec:\n  containers: [{name: c, image: nginx}]\n# token=supersecret\n")
 	target := filepath.Join(outside, "private.yaml")
 	os.WriteFile(target, secret, 0o600)
-	os.Symlink(target, filepath.Join(repo, "k8s", "app.yaml"))
+	if err := os.Symlink(target, filepath.Join(repo, "k8s", "app.yaml")); err != nil {
+		t.Skipf("symlinks not available: %v", err) // Windows without the privilege
+	}
 	os.Symlink(outside, filepath.Join(repo, "linked-dir"))
 	_, out, errOut := run(t, "check", "-f", repo, "--fix")
 	if data, _ := os.ReadFile(target); string(data) != string(secret) {

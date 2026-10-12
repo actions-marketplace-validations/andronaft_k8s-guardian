@@ -56,6 +56,9 @@ type File struct {
 	// write documents that were not modified byte for byte. nil when the
 	// stream could not be split reliably.
 	raw []rawDoc
+	// crlf is set when the input uses Windows line endings; re-encoded
+	// documents then use them too, so a fix doesn't mix line endings.
+	crlf bool
 }
 
 type rawDoc struct {
@@ -88,6 +91,7 @@ func Parse(data []byte, source string) (*File, error) {
 		}
 	}
 	f.raw = rawDocuments(data, f.Docs)
+	f.crlf = bytes.Count(data, []byte("\r\n")) > bytes.Count(data, []byte("\n"))/2
 	return f, nil
 }
 
@@ -244,9 +248,14 @@ func (f *File) addObject(root *yaml.Node) {
 // modified ones are re-encoded.
 func (f *File) Encode() ([]byte, error) {
 	var buf bytes.Buffer
+	nl := []byte("\n")
+	if f.crlf {
+		nl = []byte("\r\n")
+	}
 	for i, d := range f.Docs {
 		if i > 0 {
-			buf.WriteString("---\n")
+			buf.WriteString("---")
+			buf.Write(nl)
 		}
 		enc, err := encodeDoc(d)
 		if err != nil {
@@ -259,6 +268,9 @@ func (f *File) Encode() ([]byte, error) {
 		keepBlockScalars(d)
 		if enc, err = encodeDoc(d); err != nil {
 			return nil, err
+		}
+		if f.crlf {
+			enc = bytes.ReplaceAll(enc, []byte("\n"), nl)
 		}
 		buf.Write(enc)
 	}
