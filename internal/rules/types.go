@@ -113,9 +113,9 @@ type Rule struct {
 	Container func(t *Target, c *Container) string
 	// Pod returns a violation message for the pod spec / workload, or "".
 	Pod func(t *Target) string
-	// Resource checks any object (not only workloads). all holds every
+	// Resource checks any object (not only workloads). set holds every
 	// object of the current run so rules can cross-reference resources.
-	Resource func(o *manifest.Object, all []*manifest.Object) []string
+	Resource func(o *manifest.Object, set *Set) []string
 	// Custom marks rules loaded from user rule files.
 	Custom bool
 	// Fix applies a deterministic remediation. c is nil for pod-level rules.

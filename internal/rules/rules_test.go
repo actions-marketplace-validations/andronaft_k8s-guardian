@@ -448,3 +448,49 @@ func TestRemovedAPIsDoNotFlagCurrentBetaKinds(t *testing.T) {
 		}
 	}
 }
+
+// generated returns n apps (Deployment, Service, HPA) spread over 20
+// namespaces, the shape that made the cross-resource rules quadratic.
+func generated(b *testing.B, n int) []*manifest.Object {
+	b.Helper()
+	var sb strings.Builder
+	for i := 0; i < n; i++ {
+		fmt.Fprintf(&sb, `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: app%[1]d, namespace: ns%[2]d}
+spec:
+  selector: {matchLabels: {app: app%[1]d}}
+  template:
+    metadata: {labels: {app: app%[1]d}}
+    spec:
+      containers: [{name: app, image: r.io/app:1, ports: [{name: http, containerPort: 8080}]}]
+---
+apiVersion: v1
+kind: Service
+metadata: {name: app%[1]d, namespace: ns%[2]d}
+spec: {selector: {app: app%[1]d}, ports: [{port: 80, targetPort: http}]}
+---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: app%[1]d, namespace: ns%[2]d}
+spec: {scaleTargetRef: {kind: Deployment, name: app%[1]d}, minReplicas: 2, maxReplicas: 5}
+---
+`, i, i%20)
+	}
+	f, err := manifest.Parse([]byte(sb.String()), "bench.yaml")
+	if err != nil {
+		b.Fatal(err)
+	}
+	return f.Objects
+}
+
+func BenchmarkValidate(b *testing.B) {
+	for _, n := range []int{1000, 10000} {
+		objs := generated(b, n/3)
+		b.Run(fmt.Sprint(n), func(b *testing.B) {
+			for b.Loop() {
+				rules.Validate(objs, rules.NewOptions(""))
+			}
+		})
+	}
+}

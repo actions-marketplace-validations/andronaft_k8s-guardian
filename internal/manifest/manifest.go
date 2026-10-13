@@ -133,23 +133,22 @@ func splitDocuments(data []byte, docs []*yaml.Node) []chunk {
 	sp.last = len(lines)
 	chunks, spans = append(chunks, cur), append(spans, sp)
 
+	// Spans are in order and their last lines strictly increase, so the
+	// span ending at or after a line is found by binary search.
+	endingAt := func(line int) int {
+		return sort.Search(len(spans), func(i int) bool { return spans[i].last >= line })
+	}
 	for di, d := range docs {
 		line := d.Content[0].Line
 		ci := -1
-		for i, s := range spans {
-			if line >= s.first && line <= s.last {
-				ci = i
-				break
-			}
+		if i := endingAt(line); i < len(spans) && spans[i].first <= line {
+			ci = i
 		}
 		// A comment-only document decodes to an empty null scalar positioned
 		// at the next "---"; it belongs to the chunk that ends right before.
 		if n := d.Content[0]; n.Kind == yaml.ScalarNode && n.Tag == "!!null" && n.Value == "" {
-			for i, s := range spans {
-				if s.last == line-1 && chunks[i].doc < 0 {
-					ci = i
-					break
-				}
+			if i := endingAt(line - 1); i < len(spans) && spans[i].last == line-1 && chunks[i].doc < 0 {
+				ci = i
 			}
 		}
 		if ci < 0 || chunks[ci].doc >= 0 {

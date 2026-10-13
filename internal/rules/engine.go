@@ -52,6 +52,7 @@ func (o Options) Enabled(r *Rule, obj *manifest.Object) bool {
 // Validate runs every enabled rule against the objects.
 func Validate(objs []*manifest.Object, opts Options) []Finding {
 	var out []Finding
+	set := NewSet(objs)
 	for _, o := range objs {
 		t := NewTarget(o)
 		for _, r := range opts.Rules() {
@@ -59,7 +60,7 @@ func Validate(objs []*manifest.Object, opts Options) []Finding {
 				continue
 			}
 			if r.Resource != nil {
-				for _, msg := range r.Resource(o, objs) {
+				for _, msg := range r.Resource(o, set) {
 					out = append(out, newResourceFinding(r, o, msg))
 				}
 			}

@@ -333,7 +333,7 @@ func Compile(d Document) (*rules.Rule, error) {
 	r := &rules.Rule{ID: s.ID, Name: name, Severity: sev, Description: s.Description, Custom: true}
 	switch s.Match.Scope {
 	case "", "resource":
-		r.Resource = func(o *manifest.Object, _ []*manifest.Object) []string {
+		r.Resource = func(o *manifest.Object, _ *rules.Set) []string {
 			if !kindOK(o) {
 				return nil
 			}
