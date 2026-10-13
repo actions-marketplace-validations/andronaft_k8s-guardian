@@ -40,7 +40,7 @@ examples/insecure-deployment.yaml  Deployment/web
 
 Privileged containers and host namespaces are never changed automatically, because node agents need them on purpose.
 
-Fixes are idempotent. Comments are kept, and documents that a fix does not change are written back byte for byte. Rendered Helm charts and Kustomize overlays can't be rewritten, so their fixed YAML is printed instead. `--stdout` prints fixed YAML for any input.
+Fixes are idempotent. Comments are kept, and everything a fix does not change (other documents, separators, comment-only documents such as Helm's `# Source:` lines) is written back byte for byte. Rendered Helm charts and Kustomize overlays can't be rewritten, so their fixed YAML is printed instead. `--stdout` prints fixed YAML for any input.
 
 To review each fix before it is applied, see [interactive review](interactive.md). For Claude-powered fixes, see [AI features](ai.md).
 

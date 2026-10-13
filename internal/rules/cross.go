@@ -141,7 +141,7 @@ func init() {
 		&Rule{
 			ID: "KG016", Name: "service-target-port", Severity: Warning,
 			Description: "A Service must select the workload it was written for (no near-miss selector labels), and its targetPort must match a declared containerPort.",
-			Resource: func(o *manifest.Object, all []*manifest.Object) []string {
+			Resource: func(o *manifest.Object, set *Set) []string {
 				if o.Kind() != "Service" {
 					return nil
 				}
@@ -150,16 +150,11 @@ func init() {
 					return nil
 				}
 				var matched, near []*Target
-				for _, w := range all {
-					t := NewTarget(w)
-					if t == nil || w.Namespace() != o.Namespace() {
-						continue
-					}
-					labels := PodTemplateLabels(w)
-					if labelsMatch(sel, labels) {
-						matched = append(matched, t)
-					} else if labelsOverlap(sel, labels) {
-						near = append(near, t)
+				for _, w := range set.workloadsIn(o.Namespace()) {
+					if labelsMatch(sel, w.labels) {
+						matched = append(matched, w.target)
+					} else if labelsOverlap(sel, w.labels) {
+						near = append(near, w.target)
 					}
 				}
 				if len(matched) == 0 {
@@ -204,7 +199,7 @@ func init() {
 		&Rule{
 			ID: "KG017", Name: "removed-api-version", Severity: Error,
 			Description: "Resources must not use API versions that have been removed from Kubernetes.",
-			Resource: func(o *manifest.Object, _ []*manifest.Object) []string {
+			Resource: func(o *manifest.Object, _ *Set) []string {
 				if r, ok := LookupRemovedAPI(o.APIVersion(), o.Kind()); ok {
 					return []string{fmt.Sprintf("apiVersion %s was removed in Kubernetes %s; use %s", o.APIVersion(), r.RemovedIn, r.Replacement)}
 				}
@@ -214,7 +209,7 @@ func init() {
 		&Rule{
 			ID: "KG018", Name: "rbac-wildcard", Severity: Warning,
 			Description: "Roles and ClusterRoles should list the verbs and resources they need instead of \"*\".",
-			Resource: func(o *manifest.Object, _ []*manifest.Object) []string {
+			Resource: func(o *manifest.Object, _ *Set) []string {
 				if o.Kind() != "Role" && o.Kind() != "ClusterRole" {
 					return nil
 				}

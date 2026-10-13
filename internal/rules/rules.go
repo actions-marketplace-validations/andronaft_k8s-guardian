@@ -280,13 +280,13 @@ var All = []*Rule{
 	{
 		ID: "KG015", Name: "high-availability", Severity: Info,
 		Description: "Deployments and StatefulSets should run at least 2 replicas (or an HPA with minReplicas >= 2) for availability.",
-		Resource: func(o *manifest.Object, all []*manifest.Object) []string {
+		Resource: func(o *manifest.Object, set *Set) []string {
 			k := o.Kind()
 			if k != "Deployment" && k != "StatefulSet" && k != "Rollout" {
 				return nil
 			}
 			// An HorizontalPodAutoscaler decides the replica count.
-			if hpa := findHPA(o, all); hpa != nil {
+			if hpa := set.hpaFor(o); hpa != nil {
 				min := yamlx.String(hpa.Root, "spec", "minReplicas")
 				if min == "" {
 					min = "1" // the API default
@@ -306,18 +306,6 @@ var All = []*Rule{
 			return nil
 		},
 	},
-}
-
-// findHPA returns the HorizontalPodAutoscaler in all that scales o.
-func findHPA(o *manifest.Object, all []*manifest.Object) *manifest.Object {
-	for _, h := range all {
-		if h.Kind() == "HorizontalPodAutoscaler" && h.Namespace() == o.Namespace() &&
-			yamlx.String(h.Root, "spec", "scaleTargetRef", "kind") == o.Kind() &&
-			yamlx.String(h.Root, "spec", "scaleTargetRef", "name") == o.Name() {
-			return h
-		}
-	}
-	return nil
 }
 
 func isPrivileged(c *Container) bool {

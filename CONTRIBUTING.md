@@ -19,6 +19,7 @@ make e2e     # real kube-apiserver + etcd (envtest), Kyverno CLI and Prometheus
 make lint    # go vet + gofmt
 make demo    # re-record docs/demo.gif (needs agg)
 hack/charts/run.sh   # run against 30 popular Helm charts (docs/real-world-test.md)
+go test ./internal/rules -run '^$' -fuzz FuzzValidateAndFix -fuzztime 2m   # random YAML: no panics, idempotent fixes
 ```
 
 Tests never talk to a real cluster or the Claude API: cluster access is
