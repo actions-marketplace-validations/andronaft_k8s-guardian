@@ -60,9 +60,7 @@ func encode(t *testing.T, f *File) string {
 
 func TestEncodeKeepsUnmodifiedDocumentsVerbatim(t *testing.T) {
 	f := parse(t, stream)
-	// The comment-only first chunk is kept with the document that follows it.
-	want := strings.Replace(stream, "# header comment\n---\n", "# header comment\n", 1)
-	if got := encode(t, f); got != want {
+	if got := encode(t, f); got != stream {
 		t.Fatalf("round trip changed the stream:\n%s", got)
 	}
 }
@@ -77,7 +75,7 @@ func TestEncodeRewritesOnlyModifiedDocuments(t *testing.T) {
 	}
 	yamlx.Set(yamlx.Path(deploy.Root, "metadata"), "namespace", yamlx.Str("prod"))
 	got := encode(t, f)
-	cm := strings.SplitN(got, "---\n", 2)[0]
+	cm := strings.SplitN(got, "---\n", 3)[1]
 	if !strings.Contains(cm, "  config.yaml: |\n\n    starts") || !strings.Contains(cm, "    [a,b]\n    [c,d]\n") {
 		t.Errorf("unmodified ConfigMap was reformatted:\n%s", cm)
 	}
@@ -93,7 +91,7 @@ func TestEncodeKeepsLeadingNewlineInModifiedBlockScalar(t *testing.T) {
 	var back struct {
 		Data map[string]string `yaml:"data"`
 	}
-	if err := yaml.Unmarshal([]byte(strings.SplitN(encode(t, f), "---\n", 2)[0]), &back); err != nil {
+	if err := yaml.Unmarshal([]byte(strings.SplitN(encode(t, f), "---\n", 3)[1]), &back); err != nil {
 		t.Fatal(err)
 	}
 	if want := "\nstarts: with an empty line\n"; back.Data["config.yaml"] != want {
@@ -101,10 +99,35 @@ func TestEncodeKeepsLeadingNewlineInModifiedBlockScalar(t *testing.T) {
 	}
 }
 
+func TestEncodeKeepsSeparatorsAndEmptyDocuments(t *testing.T) {
+	cm := "apiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\n"
+	for _, in := range []string{
+		"---\n# Source: c/templates/empty.yaml\n---\n# Source: c/templates/cm.yaml\n" + cm, // helm template output
+		cm + "---\n",
+		cm + "---\n---\n" + cm,
+		"--- # first\n" + cm + "---\t\n" + cm,
+		"# only a comment\n",
+		"---",
+		"",
+	} {
+		f := parse(t, in)
+		if got := encode(t, f); got != in {
+			t.Errorf("round trip changed %q to %q", in, got)
+		}
+	}
+	// A fix still keeps the separators and the empty documents around it.
+	f := parse(t, "---\n# Source: c/templates/empty.yaml\n---\n"+cm+"---\n")
+	yamlx.Set(yamlx.Path(f.Objects[0].Root, "metadata"), "namespace", yamlx.Str("prod"))
+	want := "---\n# Source: c/templates/empty.yaml\n---\napiVersion: v1\nkind: ConfigMap\nmetadata: {name: a, namespace: prod}\n---\n"
+	if got := encode(t, f); got != want {
+		t.Errorf("fixed stream:\n%q\nwant\n%q", got, want)
+	}
+}
+
 func TestEncodeFallsBackForUnusualStreams(t *testing.T) {
 	// Content on the "---" line can't be split by line; everything is re-encoded.
 	f := parse(t, "--- {kind: ConfigMap, apiVersion: v1, metadata: {name: a}}\n---\nkind: Secret\napiVersion: v1\nmetadata: {name: b}\n")
-	if f.raw != nil {
+	if f.chunks != nil {
 		t.Fatal("expected the verbatim mode to be disabled")
 	}
 	if got := encode(t, f); !strings.Contains(got, "name: a") || !strings.Contains(got, "name: b") {

@@ -52,17 +52,21 @@ type File struct {
 	Objects  []*Object
 	Writable bool // false for rendered Helm charts and cluster resources
 
-	// raw holds the original text of each document in Docs, so Encode can
-	// write documents that were not modified byte for byte. nil when the
-	// stream could not be split reliably.
-	raw []rawDoc
+	// chunks is the source split at "---" lines, so Encode can write
+	// everything a fix doesn't change byte for byte: separators, comments,
+	// empty documents and unmodified documents. nil when the stream could
+	// not be split reliably.
+	chunks []chunk
 	// crlf is set when the input uses Windows line endings; re-encoded
 	// documents then use them too, so a fix doesn't mix line endings.
 	crlf bool
 }
 
-type rawDoc struct {
-	text    []byte // original source of the document
+// chunk is the source text between two "---" lines.
+type chunk struct {
+	sep     []byte // the "---" line that starts the chunk, verbatim (nil for the first)
+	text    []byte
+	doc     int    // index in Docs, or -1 for a chunk with only comments or blank lines
 	encoded []byte // how the unmodified document encodes
 }
 
@@ -90,29 +94,28 @@ func Parse(data []byte, source string) (*File, error) {
 			f.addObject(d.Content[0])
 		}
 	}
-	f.raw = rawDocuments(data, f.Docs)
+	f.chunks = splitDocuments(data, f.Docs)
 	f.crlf = bytes.Count(data, []byte("\r\n")) > bytes.Count(data, []byte("\n"))/2
 	return f, nil
 }
 
 var (
-	docStart = regexp.MustCompile(`^---[ \t]*$`)
+	docStart = regexp.MustCompile(`^---[ \t]*(#.*)?$`)
 	// Markers this simple splitter does not understand: directives,
 	// document end markers and content on the "---" line.
 	docUnsupported = regexp.MustCompile(`^(%|\.\.\.|---[ \t]*[^ \t#])`)
 	commentOnly    = regexp.MustCompile(`^\s*(#.*)?$`)
 )
 
-// rawDocuments splits data at "---" lines and pairs every decoded document
-// with its source text. It returns nil when the pairing is not exact.
-func rawDocuments(data []byte, docs []*yaml.Node) []rawDoc {
-	type chunk struct {
-		first, last int // 1-based line range of the chunk's content
-		text        []byte
-	}
+// splitDocuments splits data at "---" lines and pairs every decoded
+// document with the chunk it came from. It returns nil when the pairing is
+// not exact.
+func splitDocuments(data []byte, docs []*yaml.Node) []chunk {
+	type span struct{ first, last int } // 1-based line range of a chunk's text
 	var chunks []chunk
+	var spans []span
 	lines := bytes.SplitAfter(data, []byte("\n"))
-	cur := chunk{first: 1}
+	cur, sp := chunk{doc: -1}, span{first: 1}
 	for i, l := range lines {
 		n := i + 1
 		trimmed := bytes.TrimRight(l, "\r\n")
@@ -120,25 +123,21 @@ func rawDocuments(data []byte, docs []*yaml.Node) []rawDoc {
 			return nil
 		}
 		if docStart.Match(trimmed) {
-			cur.last = n - 1
-			chunks = append(chunks, cur)
-			cur = chunk{first: n + 1}
+			sp.last = n - 1
+			chunks, spans = append(chunks, cur), append(spans, sp)
+			cur, sp = chunk{sep: l, doc: -1}, span{first: n + 1}
 			continue
 		}
 		cur.text = append(cur.text, l...)
 	}
-	cur.last = len(lines)
-	chunks = append(chunks, cur)
+	sp.last = len(lines)
+	chunks, spans = append(chunks, cur), append(spans, sp)
 
-	owner := make([]int, len(chunks))
-	for i := range owner {
-		owner[i] = -1
-	}
 	for di, d := range docs {
 		line := d.Content[0].Line
 		ci := -1
-		for i, c := range chunks {
-			if line >= c.first && line <= c.last {
+		for i, s := range spans {
+			if line >= s.first && line <= s.last {
 				ci = i
 				break
 			}
@@ -146,54 +145,33 @@ func rawDocuments(data []byte, docs []*yaml.Node) []rawDoc {
 		// A comment-only document decodes to an empty null scalar positioned
 		// at the next "---"; it belongs to the chunk that ends right before.
 		if n := d.Content[0]; n.Kind == yaml.ScalarNode && n.Tag == "!!null" && n.Value == "" {
-			for i, c := range chunks {
-				if c.last == line-1 && owner[i] < 0 {
+			for i, s := range spans {
+				if s.last == line-1 && chunks[i].doc < 0 {
 					ci = i
 					break
 				}
 			}
 		}
-		if ci < 0 || owner[ci] >= 0 {
+		if ci < 0 || chunks[ci].doc >= 0 {
 			return nil
 		}
-		owner[ci] = di
-	}
-
-	raw := make([]rawDoc, len(docs))
-	var pending []byte // comment-only chunks, kept with the next document
-	last := -1
-	for i, c := range chunks {
-		di := owner[i]
-		if di < 0 {
-			for _, l := range bytes.Split(c.text, []byte("\n")) {
-				if !commentOnly.Match(l) {
-					return nil
-				}
-			}
-			if len(bytes.TrimSpace(c.text)) > 0 {
-				pending = append(pending, c.text...)
-			}
-			continue
-		}
-		text := append(pending, c.text...)
-		pending = nil
-		if len(text) > 0 && text[len(text)-1] != '\n' {
-			text = append(text, '\n')
-		}
-		enc, err := encodeDoc(docs[di])
+		enc, err := encodeDoc(d)
 		if err != nil {
 			return nil
 		}
-		raw[di] = rawDoc{text: text, encoded: enc}
-		last = di
+		chunks[ci].doc, chunks[ci].encoded = di, enc
 	}
-	if len(pending) > 0 {
-		if last < 0 {
-			return nil
+	for _, c := range chunks {
+		if c.doc >= 0 {
+			continue
 		}
-		raw[last].text = append(raw[last].text, pending...)
+		for _, l := range bytes.Split(c.text, []byte("\n")) {
+			if !commentOnly.Match(l) {
+				return nil
+			}
+		}
 	}
-	return raw
+	return chunks
 }
 
 func encodeDoc(d *yaml.Node) ([]byte, error) {
@@ -243,66 +221,72 @@ func (f *File) addObject(root *yaml.Node) {
 	f.Objects = append(f.Objects, o)
 }
 
-// Encode renders the file back to YAML.
-// Documents that were not modified are written exactly as they were read;
-// modified ones are re-encoded.
+// Encode renders the file back to YAML. Everything a fix did not change
+// (separators, comments, empty documents, unmodified documents) is written
+// exactly as it was read; modified documents are re-encoded.
 func (f *File) Encode() ([]byte, error) {
 	var buf bytes.Buffer
-	nl := []byte("\n")
-	if f.crlf {
-		nl = []byte("\r\n")
+	if f.chunks != nil {
+		for _, c := range f.chunks {
+			buf.Write(c.sep)
+			if c.doc < 0 {
+				buf.Write(c.text)
+				continue
+			}
+			d := f.Docs[c.doc]
+			enc, err := encodeDoc(d)
+			if err != nil {
+				return nil, err
+			}
+			if bytes.Equal(enc, c.encoded) {
+				buf.Write(c.text)
+				continue
+			}
+			if enc, err = f.reencode(d); err != nil {
+				return nil, err
+			}
+			buf.Write(enc)
+		}
+		return buf.Bytes(), nil
 	}
 	for i, d := range f.Docs {
 		if i > 0 {
 			buf.WriteString("---")
-			buf.Write(nl)
+			buf.Write(f.newline())
 		}
-		enc, err := encodeDoc(d)
+		enc, err := f.reencode(d)
 		if err != nil {
 			return nil, err
-		}
-		if len(f.raw) == len(f.Docs) && f.raw[i].text != nil && bytes.Equal(enc, f.raw[i].encoded) {
-			buf.Write(f.raw[i].text)
-			continue
-		}
-		keepBlockScalars(d)
-		if enc, err = encodeDoc(d); err != nil {
-			return nil, err
-		}
-		if f.crlf {
-			enc = bytes.ReplaceAll(enc, []byte("\n"), nl)
 		}
 		buf.Write(enc)
 	}
 	return buf.Bytes(), nil
 }
 
-// Load reads manifests from a file, a directory (recursively), a Helm chart
-// directory (rendered with `helm template`) or "-" for stdin. Explicit
-// files must parse; see LoadDir for the rules that apply while walking.
-func Load(path string) ([]*File, error) {
-	files, warnings, err := LoadWithWarnings(path)
-	if err == nil && len(warnings) > 0 {
-		for _, w := range warnings {
-			fmt.Fprintln(os.Stderr, "warning:", w)
-		}
+func (f *File) newline() []byte {
+	if f.crlf {
+		return []byte("\r\n")
 	}
-	return files, err
+	return []byte("\n")
+}
+
+// reencode encodes a modified document with the file's line endings.
+func (f *File) reencode(d *yaml.Node) ([]byte, error) {
+	keepBlockScalars(d)
+	enc, err := encodeDoc(d)
+	if err != nil {
+		return nil, err
+	}
+	if f.crlf {
+		enc = bytes.ReplaceAll(enc, []byte("\n"), f.newline())
+	}
+	return enc, nil
 }
 
 // skipDirs are never walked: dependencies and VCS/tool metadata.
 var skipDirs = map[string]bool{"node_modules": true, "vendor": true}
 
 var looksLikeManifest = regexp.MustCompile(`(?m)^\s*apiVersion:`)
-
-// LoadWithWarnings is Load that returns non-fatal problems instead of
-// printing them. While walking a directory, YAML files that do not parse are
-// skipped with a warning unless they look like Kubernetes manifests (a
-// broken manifest must fail the check), and Helm charts that can't be
-// rendered are skipped with a warning.
-func LoadWithWarnings(path string) ([]*File, []string, error) {
-	return LoadWith(path, LoadOptions{})
-}
 
 // LoadOptions customise how inputs are rendered.
 type LoadOptions struct {
@@ -318,7 +302,13 @@ type LoadOptions struct {
 	Exclude func(path string) bool
 }
 
-// LoadWith is LoadWithWarnings with options.
+// LoadWith reads manifests from a file, a directory (recursively), a Helm
+// chart directory (rendered with `helm template`) or "-" for stdin, and
+// returns non-fatal problems as warnings. Explicit files must parse. While
+// walking a directory, YAML files that do not parse are skipped with a
+// warning unless they look like Kubernetes manifests (a broken manifest must
+// fail the check), and Helm charts that can't be rendered are skipped with a
+// warning.
 func LoadWith(path string, o LoadOptions) ([]*File, []string, error) {
 	if path == "-" {
 		data, err := io.ReadAll(os.Stdin)
