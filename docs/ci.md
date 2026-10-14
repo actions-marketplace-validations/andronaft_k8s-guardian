@@ -1,5 +1,17 @@
 # CI integration
 
+## Set up in one command
+
+```bash
+k8s-guardian init -f k8s/
+```
+
+`init` writes three files and never overwrites existing ones (`--force` does):
+
+* `.k8s-guardian.yaml`, a commented [config file](configuration.md);
+* `.k8s-guardian-baseline.json` with the findings the repository has today, so CI passes from the first run and fails only on new problems (no file when there are none);
+* `.github/workflows/k8s-guardian.yml`, the workflow below, pinned to your version (`--no-workflow` skips it).
+
 ## GitHub Action
 
 Findings appear as **annotations directly on the PR diff**, together with a Markdown job summary and an optional cost estimate:

@@ -27,7 +27,7 @@ kubeVersion: "1.33"             # render Helm charts for this version (default f
 
 ## Baseline
 
-A first run on an existing repository often reports hundreds of findings. A baseline records them, so the check only fails on **new** ones while you fix the backlog:
+A first run on an existing repository often reports hundreds of findings. A baseline records them, so the check only fails on **new** ones while you fix the backlog. [`k8s-guardian init`](ci.md#set-up-in-one-command) sets this up together with the config file; by hand:
 
 ```bash
 k8s-guardian check -f k8s/ --update-baseline          # writes .k8s-guardian-baseline.json
