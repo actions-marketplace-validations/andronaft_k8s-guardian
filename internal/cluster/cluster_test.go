@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +67,13 @@ func TestDryRunError(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s\n got: %s\nwant: %s", tc.stderr, got, tc.want)
 		}
+	}
+}
+
+func TestWarnings(t *testing.T) {
+	got := warnings("Warning: would violate PodSecurity \"restricted:latest\": runAsNonRoot != true\nWarning: apps/v1beta1 is deprecated\n\nsomething else\nWarning: \n")
+	want := []string{`would violate PodSecurity "restricted:latest": runAsNonRoot != true`, "apps/v1beta1 is deprecated"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("warnings = %q, want %q", got, want)
 	}
 }
