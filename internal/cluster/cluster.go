@@ -105,6 +105,14 @@ type Cluster interface {
 	// NamespaceLabels returns the labels of a namespace (ErrNotFound if it
 	// doesn't exist).
 	NamespaceLabels(name string) (map[string]string, error)
+	// NodeRequests returns the CPU and memory requested by the pods that
+	// run on each node, by node name.
+	NodeRequests() (map[string]Requests, error)
+}
+
+// Requests are CPU (millicores) and memory (bytes) requests.
+type Requests struct {
+	MilliCPU, Bytes int64
 }
 
 // Usage is the observed consumption of a container.

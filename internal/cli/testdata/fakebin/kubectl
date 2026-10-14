@@ -69,5 +69,8 @@ Y
     for f in $(sed -n 's/^ *- *\(.*\.yaml\)$/\1/p' "$dir/kustomization.yaml"); do
       echo "---"; sed "s/^metadata:$/metadata:\n  namespace: $ns/" "$dir/$f"
     done ;;
+  "get pods --all-namespaces --field-selector=status.phase!=Succeeded,status.phase!=Failed -o jsonpath="*)
+    # node|containers|init containers|overhead, as the jsonpath prints them.
+    printf 'node-a|500m,1Gi;100m,128Mi;||\nnode-b|1,2Gi;|50m,64Mi,Always;|\n' ;;
   *) echo "Error from server (NotFound): $args not found" >&2; exit 1 ;;
 esac

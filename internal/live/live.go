@@ -55,6 +55,10 @@ type checker struct {
 	res    *Result
 	noted  map[string]bool
 	quotas map[string]map[string]int64 // ns/quota/key -> consumed by this run
+	// requested holds what running pods request per node; nil when it
+	// can't be read.
+	requested     map[string]cluster.Requests
+	requestedRead bool
 }
 
 // Check runs all live checks. namespace overrides the namespace for objects
@@ -236,7 +240,8 @@ func (ch *checker) nodeFit(t *rules.Target, pr podRes, candidates []cluster.Node
 	for _, n := range candidates {
 		cpu, mem, ok := fits(n)
 		if ok {
-			return // fits on this node (ignoring current utilisation)
+			ch.freeCapacity(t, pr, candidates)
+			return
 		}
 		if cpu > maxCPU {
 			maxCPU, bestCPU = cpu, n
@@ -265,6 +270,54 @@ func (ch *checker) nodeFit(t *rules.Target, pr podRes, candidates []cluster.Node
 		parts = append(parts, "nodes with enough room are excluded ("+describe(big)+")")
 	}
 	ch.add("LV003", t.Obj, "", "pod "+strings.Join(parts, "; ")+": pods will stay Pending")
+}
+
+// freeCapacity warns when a pod fits a node's allocatable resources but no
+// candidate has that much left after the requests of the pods running on
+// it. That is a warning, not an error: the pod stays Pending until capacity
+// is freed, or the cluster autoscaler adds a node.
+func (ch *checker) freeCapacity(t *rules.Target, pr podRes, candidates []cluster.Node) {
+	switch t.Obj.Kind() {
+	case "StatefulSet", "DaemonSet":
+		// An update replaces each pod in place, so the requests of the
+		// running pods would be counted twice.
+		if _, err := ch.c.Get(t.Obj.Kind(), t.Obj.APIVersion(), ch.nsOf(t.Obj), t.Obj.Name()); err == nil || !errors.Is(err, cluster.ErrNotFound) {
+			return
+		}
+	}
+	if !ch.requestedRead {
+		ch.requestedRead = true
+		var err error
+		if ch.requested, err = ch.c.NodeRequests(); err != nil {
+			ch.note("free node capacity", err)
+		}
+	}
+	if ch.requested == nil {
+		return
+	}
+	var cpuNode, memNode string
+	freeCPU, freeMem := int64(-1), int64(-1)
+	for _, n := range candidates {
+		cpu, _ := quantity.MilliCPU(orZero(n.AllocCPU))
+		mem, _ := quantity.Bytes(orZero(n.AllocMemory))
+		used := ch.requested[n.Name]
+		c, m := cpu-used.MilliCPU, mem-used.Bytes
+		if c >= pr.req[cpuKey] && m >= pr.req[memKey] {
+			return
+		}
+		if c > freeCPU {
+			freeCPU, cpuNode = c, n.Name
+		}
+		if m > freeMem {
+			freeMem, memNode = m, n.Name
+		}
+	}
+	most := fmt.Sprintf("%s has %s CPU free", cpuNode, quantity.FormatCPU(max(freeCPU, 0)))
+	if memNode != cpuNode || freeMem < pr.req[memKey] {
+		most += fmt.Sprintf(", %s has %s memory free", memNode, quantity.FormatBytes(max(freeMem, 0)))
+	}
+	ch.addSev("LV003", t.Obj, "", fmt.Sprintf("pod requests %s CPU and %s memory: matching nodes are big enough, but none has that much free after the requests of running pods (most: %s): pods stay Pending until capacity is freed or added",
+		quantity.FormatCPU(pr.req[cpuKey]), quantity.FormatBytes(pr.req[memKey]), most), rules.Warning)
 }
 
 func (ch *checker) limitRange(t *rules.Target, ns *cluster.Namespace, pr podRes) {

@@ -20,7 +20,11 @@ type Fake struct {
 	DryRun func(o *manifest.Object, namespace string) (*DryRun, error)
 	// Labels are namespace labels by namespace name.
 	Labels map[string]map[string]string
+	// Requested is what running pods request on each node.
+	Requested map[string]Requests
 }
+
+func (f *Fake) NodeRequests() (map[string]Requests, error) { return f.Requested, nil }
 
 func (f *Fake) DryRunApply(o *manifest.Object, namespace string) (*DryRun, error) {
 	if f.DryRun == nil {

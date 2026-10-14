@@ -4,6 +4,9 @@ package e2e
 
 import (
 	"bytes"
+	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -119,5 +122,56 @@ func TestLiveChecksAndDiffAgainstAPIServer(t *testing.T) {
 	pod := "apiVersion: v1\nkind: Pod\nmetadata: {name: big, namespace: shop}\nspec:\n  containers:\n  - name: c\n    image: r.io/a:1\n    resources: {requests: {cpu: '4'}, limits: {cpu: '4'}}\n"
 	if out, err := kubectl(t, pod, "apply", "--dry-run=server", "-f", "-"); err == nil || !strings.Contains(out, "maximum cpu usage per Container is 2") {
 		t.Errorf("expected LimitRange rejection:\n%s", out)
+	}
+}
+
+// A pod fits a node's allocatable CPU, but a pod bound to that node
+// already requests most of it.
+func TestLiveFreeCapacity(t *testing.T) {
+	namespace(t, "busy")
+	mustKubectl(t, `apiVersion: v1
+kind: Node
+metadata: {name: node-busy, labels: {pool: busy}}
+spec:
+  taints: [{key: dedicated, value: busy, effect: NoSchedule}]
+---
+apiVersion: v1
+kind: Pod
+metadata: {name: hog, namespace: busy}
+spec:
+  nodeName: node-busy
+  containers: [{name: hog, image: r.io/hog:1, resources: {requests: {cpu: "2", memory: 1Gi}}}]
+`, "apply", "-f", "-")
+	mustKubectl(t, "", "taint", "nodes", "node-busy", "node.kubernetes.io/not-ready:NoSchedule-")
+	mustKubectl(t, "", "patch", "node", "node-busy", "--subresource=status", "--type=merge", "-p",
+		`{"status":{"allocatable":{"cpu":"3","memory":"8Gi","pods":"110"},"capacity":{"cpu":"3","memory":"8Gi","pods":"110"}}}`)
+
+	app := `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: app, namespace: busy}
+spec:
+  selector: {matchLabels: {app: app}}
+  template:
+    metadata: {labels: {app: app}}
+    spec:
+      nodeSelector: {pool: busy}
+      tolerations: [{key: dedicated, value: busy}]
+      containers: [{name: app, image: r.io/app:1, resources: {requests: {cpu: "%s", memory: 1Gi}}}]
+`
+	path := filepath.Join(t.TempDir(), "app.yaml")
+	for cpu, want := range map[string]string{
+		"2":    "LV003  pod requests 2 CPU and 1Gi memory: matching nodes are big enough, but none has that much free after the requests of running pods (most: node-busy has 1 CPU free",
+		"500m": "",
+	} {
+		if err := os.WriteFile(path, []byte(fmt.Sprintf(app, cpu)), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		_, out := run("check", "-f", path, "--live", "--skip", "KG003,KG005,KG006,KG007,KG008,KG009,KG010,KG013,KG014,KG015,KG002")
+		if want == "" && strings.Contains(out, "LV003") || want != "" && !strings.Contains(out, want) {
+			t.Errorf("cpu %s: want %q in:\n%s", cpu, want, out)
+		}
+		if strings.Contains(out, "free node capacity") {
+			t.Errorf("listing pods failed:\n%s", out)
+		}
 	}
 }
