@@ -5,7 +5,7 @@ package yamlx
 import (
 	"strconv"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 // Get returns the value node stored under key in mapping node m, or nil.
