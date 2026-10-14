@@ -261,3 +261,48 @@ func TestNodeFitUnknownSchedulingFieldsMatch(t *testing.T) {
 		}
 	}
 }
+
+func TestNodeFitFreeCapacity(t *testing.T) {
+	nodes := []cluster.Node{
+		{Name: "a", AllocCPU: "16", AllocMemory: "64Gi"},
+		{Name: "b", AllocCPU: "16", AllocMemory: "64Gi"},
+	}
+	run := func(kind string, requested map[string]cluster.Requests, existing bool) []rules.Finding {
+		doc := "apiVersion: apps/v1\nkind: " + kind + "\nmetadata: {name: app, namespace: prod}\nspec:\n  template:\n    spec:\n      containers:\n        - name: app\n          image: r.io/app:1\n          resources: {requests: {cpu: \"8\", memory: 1Gi}}\n"
+		f, err := manifest.Parse([]byte(doc), "app.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		c := fake()
+		c.NodeList, c.Requested = nodes, requested
+		if existing {
+			c.Objects = map[string]*manifest.Object{kind + "/prod/app": f.Objects[0]}
+		}
+		var out []rules.Finding
+		for _, fd := range Check(c, f.Objects, "", rules.NewOptions("")).Findings {
+			if fd.RuleID == "LV003" {
+				out = append(out, fd)
+			}
+		}
+		return out
+	}
+	full := map[string]cluster.Requests{"a": {MilliCPU: 12000, Bytes: 8 << 30}, "b": {MilliCPU: 9000, Bytes: 60 << 30}}
+	got := run("Deployment", full, false)
+	if len(got) != 1 || got[0].Severity != rules.Warning || !strings.Contains(got[0].Message, "none has that much free after the requests of running pods (most: b has 7 CPU free, a has 56Gi memory free)") {
+		t.Errorf("full nodes: %+v", got)
+	}
+	if got := run("Deployment", map[string]cluster.Requests{"a": {MilliCPU: 12000}}, false); len(got) != 0 {
+		t.Errorf("node b is free: %+v", got)
+	}
+	if got := run("Deployment", nil, false); len(got) != 0 {
+		t.Errorf("without usage data there is nothing to report: %+v", got)
+	}
+	// Updating a StatefulSet replaces its pods in place: their requests are
+	// already counted, so the check is skipped. A new one is checked.
+	if got := run("StatefulSet", full, true); len(got) != 0 {
+		t.Errorf("existing StatefulSet: %+v", got)
+	}
+	if got := run("StatefulSet", full, false); len(got) != 1 {
+		t.Errorf("new StatefulSet: %+v", got)
+	}
+}

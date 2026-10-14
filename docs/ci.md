@@ -1,5 +1,17 @@
 # CI integration
 
+## Set up in one command
+
+```bash
+k8s-guardian init -f k8s/
+```
+
+`init` writes three files and never overwrites existing ones (`--force` does):
+
+* `.k8s-guardian.yaml`, a commented [config file](configuration.md);
+* `.k8s-guardian-baseline.json` with the findings the repository has today, so CI passes from the first run and fails only on new problems (no file when there are none);
+* `.github/workflows/k8s-guardian.yml`, the workflow below, pinned to your version (`--no-workflow` skips it).
+
 ## GitHub Action
 
 Findings appear as **annotations directly on the PR diff**, together with a Markdown job summary and an optional cost estimate:
@@ -36,8 +48,14 @@ The action runs in the repository root, so a [`.k8s-guardian.yaml`](configuratio
 | `sarif-file` | | Also write SARIF, for `github/codeql-action/upload-sarif` |
 | `cost` | `false` | Add a monthly cost estimate to the job summary |
 | `args` | | Extra arguments for `k8s-guardian check`, e.g. `--values values-prod.yaml` |
+| `new-only` | `false` | On pull requests, report only findings the pull request adds (see below) |
+| `base-ref` | the PR's base branch | Branch `new-only` compares with |
 
 Outputs: `errors`, `warnings`, `infos`, `fixable`, `sarif-file`.
+
+### Only what the pull request adds
+
+With `new-only: "true"`, the action first checks the same paths on the pull request's base branch (fetched into a separate worktree, with the base's config and the same rules). Findings that are already there count as known, like a [baseline](configuration.md#baseline), so a pull request fails only on problems it introduces, and nobody has to maintain a baseline file. Live findings (`live: "true"`) are always reported. When the base branch can't be checked (for example, the paths are new in this pull request), everything is reported with a warning.
 
 ### Code scanning (SARIF)
 

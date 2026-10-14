@@ -42,6 +42,14 @@ inputs:
     description: Extra arguments passed to `k8s-guardian check`.
     required: false
     default: ""
+  new-only:
+    description: Report only findings the pull request adds. The same paths are checked on the base branch first, and its findings are treated as a baseline. Without a base branch (not a pull request), everything is reported.
+    required: false
+    default: "false"
+  base-ref:
+    description: Branch the new-only mode compares with.
+    required: false
+    default: ${{ github.base_ref }}
 
 outputs:
   errors:
@@ -101,17 +109,38 @@ runs:
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
         INPUT_COST: ${{ inputs.cost }}
         INPUT_ARGS: ${{ inputs.args }}
+        INPUT_NEW_ONLY: ${{ inputs.new-only }}
+        INPUT_BASE_REF: ${{ inputs.base-ref }}
       run: |
         set -uo pipefail
         files=()
         for p in $INPUT_PATH; do files+=(-f "$p"); done
-        args=()
-        if [ -n "$INPUT_SKIP" ]; then args+=(--skip "$INPUT_SKIP"); fi
-        for r in $INPUT_RULES; do args+=(--rules "$r"); done
+        ruleargs=()
+        if [ -n "$INPUT_SKIP" ]; then ruleargs+=(--skip "$INPUT_SKIP"); fi
+        for r in $INPUT_RULES; do ruleargs+=(--rules "$r"); done
+        args=("${ruleargs[@]}")
         if [ "$INPUT_LIVE" = "true" ]; then args+=(--live); fi
         if [ -n "$INPUT_NAMESPACE" ]; then args+=(-n "$INPUT_NAMESPACE"); fi
         # shellcheck disable=SC2206 # extra args are intentionally word-split
         extra=($INPUT_ARGS)
+
+        if [ "$INPUT_NEW_ONLY" = "true" ]; then
+          if [ -z "$INPUT_BASE_REF" ]; then
+            echo "::notice::new-only: no base branch (not a pull request), reporting all findings"
+          else
+            # Check the same paths on the base branch; what it finds is not new.
+            base="$RUNNER_TEMP/k8s-guardian-base"
+            known="$RUNNER_TEMP/k8s-guardian-base.json"
+            if git fetch --quiet --no-tags --depth=1 origin "$INPUT_BASE_REF" &&
+              git worktree add --quiet --detach "$base" FETCH_HEAD &&
+              (cd "$base" && k8s-guardian check "${files[@]}" "${ruleargs[@]}" "${extra[@]}" --update-baseline --baseline "$known" > /dev/null); then
+              args+=(--baseline "$known")
+              echo "Reporting only findings that are not on $INPUT_BASE_REF."
+            else
+              echo "::warning::new-only: could not check $INPUT_BASE_REF (are the paths new in this pull request?), reporting all findings"
+            fi
+          fi
+        fi
 
         if [ -n "$INPUT_SARIF_FILE" ]; then
           k8s-guardian check "${files[@]}" "${args[@]}" "${extra[@]}" --format sarif --fail-on info > "$INPUT_SARIF_FILE" || true

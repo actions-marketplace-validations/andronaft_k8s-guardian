@@ -84,6 +84,8 @@ func (a *App) Run(args []string) int {
 		err = a.listRules(args[1:])
 	case "mcp", "serve":
 		err = (&mcp.Server{Version: a.Version}).Serve(ctx, os.Stdin, a.Stdout)
+	case "init":
+		code, err = a.initRepo(args[1:])
 	case "version", "--version", "-v":
 		fmt.Fprintf(a.Stdout, "%s %s\n", a.Name, a.Version)
 	case "", "help", "-h", "--help":
@@ -445,6 +447,9 @@ func (a *App) listRules(args []string) error {
 
 func (a *App) usage() {
 	fmt.Fprintf(a.Stdout, `%[1]s %[2]s — Kubernetes guardrails that know your cluster
+
+Get started:
+  %[1]s init [-f k8s/]                      Config, baseline of today's findings and a GitHub workflow
 
 Validate:
   %[1]s check -f <file|dir|chart|->         Validate manifests (files, directories, Helm charts, stdin)

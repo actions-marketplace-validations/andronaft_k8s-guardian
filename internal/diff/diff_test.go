@@ -175,14 +175,14 @@ kind: ConfigMap
 metadata: {name: elsewhere, namespace: staging}
 `
 	var calls []string
-	c := &cluster.Fake{Objects: objs, DryRun: func(o *manifest.Object, ns string) (*manifest.Object, error) {
+	c := &cluster.Fake{Objects: objs, DryRun: func(o *manifest.Object, ns string) (*cluster.DryRun, error) {
 		calls = append(calls, o.Ref()+"@"+ns)
 		switch o.Ref() {
 		case "Deployment/web":
 			// A mutating webhook injects a proxy into the live object.
 			dry, _ := manifest.Parse([]byte(strings.Replace(strings.Split(liveYAML, "---")[0], "replicas: 2", "replicas: 3", 1)+
 				"        - name: proxy\n          image: envoy:1.31\n"), "dry-run")
-			return dry.Objects[0], nil
+			return &cluster.DryRun{Object: dry.Objects[0]}, nil
 		case "Service/web":
 			return nil, &cluster.Rejection{Message: "ValidatingAdmissionPolicy 'ports' with binding 'ports' denied request: no port 80"}
 		case "Secret/creds":
@@ -244,6 +244,47 @@ metadata: {name: elsewhere, namespace: staging}
 	} {
 		if !strings.Contains(notes, want) {
 			t.Errorf("missing note %q in:\n%s", want, notes)
+		}
+	}
+}
+
+func TestServerWarnings(t *testing.T) {
+	const deploy = "apiVersion: apps/v1\nkind: Deployment\nmetadata: {name: web, namespace: %s}\nspec:\n  template:\n    spec:\n      containers: [{name: web, image: r.io/web:1}]\n"
+	psa := `would violate PodSecurity "restricted:latest": allowPrivilegeEscalation != false (container "web" must set securityContext.allowPrivilegeEscalation=false)`
+	c := &cluster.Fake{
+		Labels: map[string]map[string]string{
+			"strict":   {"pod-security.kubernetes.io/enforce": "restricted"},
+			"baseline": {"pod-security.kubernetes.io/enforce": "baseline", "pod-security.kubernetes.io/warn": "restricted"},
+			"warned":   {"pod-security.kubernetes.io/warn": "restricted"},
+		},
+		DryRun: func(o *manifest.Object, ns string) (*cluster.DryRun, error) {
+			w := []string{psa}
+			if ns == "warned" {
+				w = append(w, "apps/v1beta1 Deployment is deprecated")
+			}
+			return &cluster.DryRun{Object: o, Warnings: w}, nil
+		},
+	}
+	for ns, want := range map[string][]string{
+		"strict":   {`error DF009 pods will be rejected: namespace "strict" enforces Pod Security "restricted": allowPrivilegeEscalation != false`},
+		"baseline": {`warning DF009 the API server warns: would violate PodSecurity "restricted:latest"`},
+		"warned":   {`warning DF009 the API server warns: would violate PodSecurity`, `warning DF009 the API server warns: apps/v1beta1 Deployment is deprecated`},
+		"missing":  {`warning DF009 the API server warns: would violate PodSecurity`},
+	} {
+		f, _ := manifest.Parse([]byte(fmt.Sprintf(deploy, ns)), "app.yaml")
+		res := Run(c, f.Objects, "", rules.NewOptions(""), true)
+		var got []string
+		for _, fd := range res.Findings() {
+			got = append(got, fd.Severity.String()+" "+fd.RuleID+" "+fd.Message)
+		}
+		if len(got) != len(want) {
+			t.Errorf("%s: got %q", ns, got)
+			continue
+		}
+		for i := range want {
+			if !strings.HasPrefix(got[i], want[i]) {
+				t.Errorf("%s: got %q, want prefix %q", ns, got[i], want[i])
+			}
 		}
 	}
 }

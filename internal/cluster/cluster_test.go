@@ -2,6 +2,7 @@ package cluster
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -66,5 +67,30 @@ func TestDryRunError(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("%s\n got: %s\nwant: %s", tc.stderr, got, tc.want)
 		}
+	}
+}
+
+func TestWarnings(t *testing.T) {
+	got := warnings("Warning: would violate PodSecurity \"restricted:latest\": runAsNonRoot != true\nWarning: apps/v1beta1 is deprecated\n\nsomething else\nWarning: \n")
+	want := []string{`would violate PodSecurity "restricted:latest": runAsNonRoot != true`, "apps/v1beta1 is deprecated"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("warnings = %q, want %q", got, want)
+	}
+}
+
+func TestParseNodeRequests(t *testing.T) {
+	got := ParseNodeRequests(strings.Join([]string{
+		"n1|500m,1Gi;250m,256Mi;||",                 // two containers
+		"n1|100m,64Mi;|2,1Gi,;|10m,32Mi",            // an init container bigger than the app, plus overhead
+		"n2|1,1Gi;|200m,128Mi,Always;300m,512Mi,;|", // a sidecar adds to the app and to later init containers
+		"|1,1Gi;||", // not scheduled yet
+		"garbage",
+	}, "\n"))
+	want := map[string]Requests{
+		"n1": {MilliCPU: 750 + 2000 + 10, Bytes: (1024+256)<<20 + 1<<30 + 32<<20},
+		"n2": {MilliCPU: 1200, Bytes: 1<<30 + 128<<20},
+	}
+	if len(got) != len(want) || got["n1"] != want["n1"] || got["n2"] != want["n2"] {
+		t.Errorf("got %+v, want %+v", got, want)
 	}
 }

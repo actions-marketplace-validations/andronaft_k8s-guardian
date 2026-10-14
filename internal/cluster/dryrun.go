@@ -1,12 +1,13 @@
 package cluster
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/andronaft/k8s-guardian/internal/k8sname"
 	"github.com/andronaft/k8s-guardian/internal/kube"
@@ -23,6 +24,14 @@ type Rejection struct {
 
 func (r *Rejection) Error() string { return r.Message }
 
+// DryRun is the result of a server-side dry run.
+type DryRun struct {
+	Object *manifest.Object
+	// Warnings are the API server's warnings ("would violate PodSecurity
+	// ...", deprecated APIs, admission policies in Warn mode).
+	Warnings []string
+}
+
 // ErrForbidden means RBAC doesn't allow the request. A server-side dry run
 // needs the patch permission on the resource.
 var ErrForbidden = errors.New("forbidden by RBAC")
@@ -32,7 +41,7 @@ var ErrForbidden = errors.New("forbidden by RBAC")
 // and returns what it would store, but stores nothing. The dedicated field
 // manager and --force-conflicts make it preview the local values even where
 // another manager owns a field. namespace is used for objects without one.
-func (k *Kubectl) DryRunApply(o *manifest.Object, namespace string) (*manifest.Object, error) {
+func (k *Kubectl) DryRunApply(o *manifest.Object, namespace string) (*DryRun, error) {
 	args := []string{"apply", "--server-side", "--dry-run=server", "--force-conflicts", "--field-manager=k8s-guardian", "-o", "yaml", "-f", "-"}
 	if namespace != "" {
 		if err := k8sname.ValidNamespace(namespace); err != nil {
@@ -56,7 +65,38 @@ func (k *Kubectl) DryRunApply(o *manifest.Object, namespace string) (*manifest.O
 		return nil, fmt.Errorf("dry run returned %d objects", len(f.Objects))
 	}
 	kube.Clean(f.Objects[0])
-	return f.Objects[0], nil
+	return &DryRun{Object: f.Objects[0], Warnings: warnings(stderr)}, nil
+}
+
+// warnings returns the API server warnings kubectl printed.
+func warnings(stderr string) []string {
+	var out []string
+	for _, l := range strings.Split(stderr, "\n") {
+		if w, ok := strings.CutPrefix(strings.TrimSpace(l), "Warning: "); ok && w != "" {
+			out = append(out, w)
+		}
+	}
+	return out
+}
+
+// NamespaceLabels runs `kubectl get namespace/<name> -o json`.
+func (k *Kubectl) NamespaceLabels(name string) (map[string]string, error) {
+	if err := k8sname.ValidNamespace(name); err != nil {
+		return nil, err
+	}
+	return cached(k, "ns-labels/"+name, func() (map[string]string, error) {
+		out, err := k.run("get", "namespace/"+name, "-o", "json")
+		if err != nil {
+			return nil, err
+		}
+		var ns struct {
+			Metadata meta `json:"metadata"`
+		}
+		if err := json.Unmarshal(out, &ns); err != nil {
+			return nil, err
+		}
+		return ns.Metadata.Labels, nil
+	})
 }
 
 var (

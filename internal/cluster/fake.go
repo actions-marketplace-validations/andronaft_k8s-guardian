@@ -17,14 +17,27 @@ type Fake struct {
 	Objects    map[string]*manifest.Object // "Kind/namespace/name"
 	Usage      map[string]map[string]Usage // "namespace/app-label" -> container -> usage
 	// DryRun answers DryRunApply (nil: the fake can't dry-run).
-	DryRun func(o *manifest.Object, namespace string) (*manifest.Object, error)
+	DryRun func(o *manifest.Object, namespace string) (*DryRun, error)
+	// Labels are namespace labels by namespace name.
+	Labels map[string]map[string]string
+	// Requested is what running pods request on each node.
+	Requested map[string]Requests
 }
 
-func (f *Fake) DryRunApply(o *manifest.Object, namespace string) (*manifest.Object, error) {
+func (f *Fake) NodeRequests() (map[string]Requests, error) { return f.Requested, nil }
+
+func (f *Fake) DryRunApply(o *manifest.Object, namespace string) (*DryRun, error) {
 	if f.DryRun == nil {
 		return nil, errors.New("the fake cluster has no dry run")
 	}
 	return f.DryRun(o, namespace)
+}
+
+func (f *Fake) NamespaceLabels(name string) (map[string]string, error) {
+	if l, ok := f.Labels[name]; ok {
+		return l, nil
+	}
+	return nil, ErrNotFound
 }
 
 func (f *Fake) PodUsage(namespace string, selector map[string]string) (map[string]Usage, int, error) {

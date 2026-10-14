@@ -6,10 +6,11 @@ package diff
 import (
 	"errors"
 	"fmt"
+	"regexp"
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/andronaft/k8s-guardian/internal/cluster"
 	"github.com/andronaft/k8s-guardian/internal/manifest"
@@ -28,6 +29,7 @@ var Rules = []*rules.Rule{
 	{ID: "DF006", Name: "rollout-risk", Severity: rules.Warning, Description: "Risky rollouts: Recreate strategy downtime, scaling to zero, removed containers or ports."},
 	{ID: "DF007", Name: "rollout-info", Severity: rules.Info, Description: "Informational summary of rollouts, image and replica changes."},
 	{ID: "DF008", Name: "server-rejected", Severity: rules.Error, Description: "With --server-side: the API server rejects the object in a dry run (validation, unknown field, admission policy or webhook, quota)."},
+	{ID: "DF009", Name: "server-warning", Severity: rules.Warning, Description: "With --server-side: the API server warns about the object (Pod Security, deprecated APIs, policies in Warn mode). An error when the namespace enforces the Pod Security level the pods violate."},
 }
 
 func rule(id string) *rules.Rule {
@@ -283,12 +285,14 @@ type analysis struct {
 	all  []*manifest.Object
 }
 
-func (a *analysis) add(id, msg string) {
+func (a *analysis) add(id, msg string) { a.addSev(id, msg, rule(id).Severity) }
+
+func (a *analysis) addSev(id, msg string, sev rules.Severity) {
 	r := rule(id)
 	if !a.opts.Enabled(r, a.obj) {
 		return
 	}
-	a.d.Findings = append(a.d.Findings, rules.Finding{RuleID: r.ID, Rule: r.Name, Severity: r.Severity, Message: msg,
+	a.d.Findings = append(a.d.Findings, rules.Finding{RuleID: r.ID, Rule: r.Name, Severity: sev, Message: msg,
 		Source: a.obj.Source, Resource: a.obj.Ref(), Namespace: a.d.Namespace, Line: a.obj.Root.Line})
 }
 
@@ -442,7 +446,7 @@ func (a *analysis) rollout() {
 // a namespace or CRD created by the same set, a webhook without dry-run
 // support) is a note, never a finding.
 func (a *analysis) dryRun(c cluster.Cluster, res *Result) {
-	dry, err := c.DryRunApply(a.obj, a.d.Namespace)
+	result, err := c.DryRunApply(a.obj, a.d.Namespace)
 	var rej *cluster.Rejection
 	switch {
 	case errors.As(err, &rej):
@@ -461,9 +465,14 @@ func (a *analysis) dryRun(c cluster.Cluster, res *Result) {
 	case err != nil:
 		res.note(fmt.Sprintf("server-side dry run of %s failed: %v", a.obj.Ref(), err))
 		return
-	case a.live == nil:
+	}
+	for _, w := range result.Warnings {
+		a.warning(c, res, w)
+	}
+	if a.live == nil {
 		return
 	}
+	dry := result.Object
 	known := map[string]bool{}
 	for _, ch := range a.d.Changes {
 		known[ch.Path] = true
@@ -490,6 +499,38 @@ func (a *analysis) dryRun(c cluster.Cluster, res *Result) {
 	if _, _, local := a.changed("spec", "template"); len(template) > 0 && !local && rollsOut[a.obj.Kind()] {
 		a.add("DF007", "the API server changes the pod template ("+strings.Join(template, ", ")+"): applying triggers a rolling restart")
 	}
+}
+
+// podSecurity matches the warning Pod Security Admission gives for pods and
+// workloads that violate a namespace's level.
+var podSecurity = regexp.MustCompile(`^would violate PodSecurity "(privileged|baseline|restricted):[^"]*": (.*)$`)
+
+var levels = map[string]int{"privileged": 0, "baseline": 1, "restricted": 2}
+
+// warning reports an API server warning from the dry run as DF009. Pod
+// Security warnings are errors when the namespace enforces the level the
+// warning names (or a stricter one): the API server accepts the workload
+// but rejects its pods. The warning doesn't say whether a less strict
+// enforced level is violated too, so that stays a warning.
+func (a *analysis) warning(c cluster.Cluster, res *Result, w string) {
+	if a.obj.Kind() == "Secret" {
+		w = "details hidden, as they can contain secret values"
+	}
+	m := podSecurity.FindStringSubmatch(w)
+	if m == nil {
+		a.add("DF009", "the API server warns: "+w)
+		return
+	}
+	labels, err := c.NamespaceLabels(a.d.Namespace)
+	if err != nil && !errors.Is(err, cluster.ErrNotFound) {
+		res.note(fmt.Sprintf("Pod Security level of namespace %q unknown: %v", a.d.Namespace, err))
+	}
+	enforce := labels["pod-security.kubernetes.io/enforce"]
+	if e, ok := levels[enforce]; ok && e >= levels[m[1]] {
+		a.addSev("DF009", fmt.Sprintf("pods will be rejected: namespace %q enforces Pod Security %q: %s", a.d.Namespace, enforce, m[2]), rules.Error)
+		return
+	}
+	a.add("DF009", "the API server warns: "+w)
 }
 
 // rollsOut lists the kinds that replace their pods when the template changes.

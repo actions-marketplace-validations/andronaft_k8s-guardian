@@ -15,7 +15,7 @@ import (
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/andronaft/k8s-guardian/internal/yamlx"
 )
@@ -66,6 +66,7 @@ type File struct {
 type chunk struct {
 	sep     []byte // the "---" line that starts the chunk, verbatim (nil for the first)
 	text    []byte
+	first   int    // file line the text starts on
 	doc     int    // index in Docs, or -1 for a chunk with only comments or blank lines
 	encoded []byte // how the unmodified document encodes
 }
@@ -115,7 +116,7 @@ func splitDocuments(data []byte, docs []*yaml.Node) []chunk {
 	var chunks []chunk
 	var spans []span
 	lines := bytes.SplitAfter(data, []byte("\n"))
-	cur, sp := chunk{doc: -1}, span{first: 1}
+	cur, sp := chunk{doc: -1, first: 1}, span{first: 1}
 	for i, l := range lines {
 		n := i + 1
 		trimmed := bytes.TrimRight(l, "\r\n")
@@ -125,7 +126,7 @@ func splitDocuments(data []byte, docs []*yaml.Node) []chunk {
 		if docStart.Match(trimmed) {
 			sp.last = n - 1
 			chunks, spans = append(chunks, cur), append(spans, sp)
-			cur, sp = chunk{sep: l, doc: -1}, span{first: n + 1}
+			cur, sp = chunk{sep: l, doc: -1, first: n + 1}, span{first: n + 1}
 			continue
 		}
 		cur.text = append(cur.text, l...)
@@ -173,10 +174,17 @@ func splitDocuments(data []byte, docs []*yaml.Node) []chunk {
 	return chunks
 }
 
-func encodeDoc(d *yaml.Node) ([]byte, error) {
+func encodeDoc(d *yaml.Node) ([]byte, error) { return encodeStyled(d, false) }
+
+// encodeStyled encodes d with 2-space indentation; compact writes block
+// lists with the dash in the key's column ("key:\n- item").
+func encodeStyled(d *yaml.Node, compact bool) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := yaml.NewEncoder(&buf)
 	enc.SetIndent(2)
+	if compact {
+		enc.CompactSeqIndent()
+	}
 	if err := enc.Encode(d); err != nil {
 		return nil, err
 	}
@@ -184,6 +192,36 @@ func encodeDoc(d *yaml.Node) ([]byte, error) {
 		return nil, err
 	}
 	return buf.Bytes(), nil
+}
+
+// compactLists reports whether the document's block lists are written in
+// the compact style of kubectl and most Helm charts, with the dash in the
+// key's column ("key:\n- item"), rather than indented ("key:\n  - item").
+// Only nodes that came from the source count; a tie or a document without
+// lists is compact.
+func compactLists(n *yaml.Node) bool {
+	compact, indented := 0, 0
+	var walk func(n *yaml.Node)
+	walk = func(n *yaml.Node) {
+		if n.Kind == yaml.MappingNode {
+			for i := 0; i+1 < len(n.Content); i += 2 {
+				k, v := n.Content[i], n.Content[i+1]
+				if v.Kind != yaml.SequenceNode || v.Style&yaml.FlowStyle != 0 || k.Line == 0 || v.Line <= k.Line {
+					continue
+				}
+				if v.Column == k.Column {
+					compact++
+				} else {
+					indented++
+				}
+			}
+		}
+		for _, c := range n.Content {
+			walk(c)
+		}
+	}
+	walk(n)
+	return compact >= indented
 }
 
 // keepBlockScalars switches block scalars that yaml.v3 cannot round-trip
@@ -241,6 +279,11 @@ func (f *File) Encode() ([]byte, error) {
 				buf.Write(c.text)
 				continue
 			}
+			keepBlockScalars(d)
+			if patched := patchText(c.text, c.first, d, compactLists(d), f.newline()); patched != nil {
+				buf.Write(patched)
+				continue
+			}
 			if enc, err = f.reencode(d); err != nil {
 				return nil, err
 			}
@@ -269,10 +312,11 @@ func (f *File) newline() []byte {
 	return []byte("\n")
 }
 
-// reencode encodes a modified document with the file's line endings.
+// reencode encodes a modified document with the file's line endings and
+// the list style the document was written in.
 func (f *File) reencode(d *yaml.Node) ([]byte, error) {
 	keepBlockScalars(d)
-	enc, err := encodeDoc(d)
+	enc, err := encodeStyled(d, compactLists(d))
 	if err != nil {
 		return nil, err
 	}

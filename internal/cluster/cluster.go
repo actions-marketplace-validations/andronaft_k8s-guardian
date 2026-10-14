@@ -99,9 +99,20 @@ type Cluster interface {
 	// of pods sampled.
 	PodUsage(namespace string, selector map[string]string) (map[string]Usage, int, error)
 	// DryRunApply returns the object the API server would store for a
-	// server-side apply of o, without storing it. A refusal is a
-	// *Rejection, a missing RBAC permission ErrForbidden.
-	DryRunApply(o *manifest.Object, namespace string) (*manifest.Object, error)
+	// server-side apply of o, and its warnings, without storing it. A
+	// refusal is a *Rejection, a missing RBAC permission ErrForbidden.
+	DryRunApply(o *manifest.Object, namespace string) (*DryRun, error)
+	// NamespaceLabels returns the labels of a namespace (ErrNotFound if it
+	// doesn't exist).
+	NamespaceLabels(name string) (map[string]string, error)
+	// NodeRequests returns the CPU and memory requested by the pods that
+	// run on each node, by node name.
+	NodeRequests() (map[string]Requests, error)
+}
+
+// Requests are CPU (millicores) and memory (bytes) requests.
+type Requests struct {
+	MilliCPU, Bytes int64
 }
 
 // Usage is the observed consumption of a container.

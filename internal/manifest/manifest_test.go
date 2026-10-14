@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 
 	"github.com/andronaft/k8s-guardian/internal/yamlx"
 )
@@ -174,5 +174,125 @@ func TestEncodeKeepsWindowsLineEndings(t *testing.T) {
 	}
 	if !strings.HasPrefix(got, "apiVersion: v1\r\nkind: ConfigMap\r\nmetadata: {name: cfg}\r\ndata: {a: b}\r\n---\r\n") || !strings.Contains(got, "metadata: {name: p, namespace: prod}\r\n") {
 		t.Errorf("unexpected output:\n%q", got)
+	}
+}
+
+// fixed parses src, applies change to its last document and encodes it.
+func fixed(t *testing.T, src string, change func(doc *yaml.Node)) string {
+	t.Helper()
+	f := parse(t, src)
+	change(f.Docs[len(f.Docs)-1].Content[0])
+	return encode(t, f)
+}
+
+func container(doc *yaml.Node) *yaml.Node {
+	return yamlx.Items(yamlx.Path(doc, "spec", "template", "spec", "containers"))[0]
+}
+
+func TestFixChangesOnlyItsLines(t *testing.T) {
+	const other = "# Source: chart/templates/cm.yaml\napiVersion: v1\nkind: ConfigMap\nmetadata: {name: a}\n---\n"
+	const deploy = `apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: web
+spec:
+  template:
+    spec:
+      containers:
+      - name: web   # the app
+        image: r.io/web:1
+        args:
+          - --port=8080
+        securityContext:
+          allowPrivilegeEscalation: true # was needed once
+          readOnlyRootFilesystem:  false
+        resources: {}
+      - name: sidecar
+        image: r.io/sidecar:1
+        resources:
+          {}
+      - name: third
+        image: r.io/third:1
+        resources:
+          limits: null
+`
+	for _, tc := range []struct {
+		name   string
+		change func(doc *yaml.Node)
+		want   string // deploy with the expected edits
+	}{
+		{"new keys go above the first key on its own line", func(d *yaml.Node) {
+			yamlx.Set(yamlx.EnsureMap(yamlx.Path(d, "spec", "template", "spec"), "securityContext"), "runAsNonRoot", yamlx.Bool(true))
+			yamlx.Set(container(d), "imagePullPolicy", yamlx.Str("IfNotPresent"))
+		}, strings.NewReplacer(
+			"    spec:\n      containers:", "    spec:\n      securityContext:\n        runAsNonRoot: true\n      containers:",
+			"      - name: web   # the app\n        image: r.io/web:1", "      - name: web   # the app\n        imagePullPolicy: IfNotPresent\n        image: r.io/web:1",
+		).Replace(deploy)},
+		{"a changed scalar is replaced in place, its comment kept", func(d *yaml.Node) {
+			sc := yamlx.Get(container(d), "securityContext")
+			yamlx.Set(sc, "allowPrivilegeEscalation", yamlx.Bool(false))
+			yamlx.Set(sc, "readOnlyRootFilesystem", yamlx.Bool(true))
+		}, strings.NewReplacer(
+			"allowPrivilegeEscalation: true # was", "allowPrivilegeEscalation: false # was",
+			"readOnlyRootFilesystem:  false", "readOnlyRootFilesystem:  true",
+		).Replace(deploy)},
+		{"{} and null values are filled below their key", func(d *yaml.Node) {
+			for _, c := range yamlx.Items(yamlx.Path(d, "spec", "template", "spec", "containers")) {
+				res := yamlx.EnsureMap(c, "resources")
+				yamlx.Set(yamlx.EnsureMap(res, "limits"), "memory", yamlx.Str("128Mi"))
+			}
+		}, strings.NewReplacer(
+			"        resources: {}\n", "        resources:\n          limits:\n            memory: 128Mi\n",
+			"        resources:\n          {}\n", "        resources:\n          limits:\n            memory: 128Mi\n",
+			"          limits: null\n", "          limits:\n            memory: 128Mi\n",
+		).Replace(deploy)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// The Deployment is the second document, so its positions are not
+			// the positions in its own text.
+			if got := fixed(t, other+deploy, tc.change); got != other+tc.want {
+				t.Errorf("got:\n%s\nwant:\n%s", got, other+tc.want)
+			}
+		})
+	}
+}
+
+func TestFixFallsBackToReencoding(t *testing.T) {
+	// Removing a key can't be written as an edit: the document is re-encoded
+	// in its own (compact) list style.
+	got := fixed(t, "kind: Pod\nspec:\n  containers:\n  - name: a\n    securityContext: {runAsUser: 0}\n", func(d *yaml.Node) {
+		c := yamlx.Items(yamlx.Path(d, "spec", "containers"))[0]
+		yamlx.Delete(yamlx.Get(c, "securityContext"), "runAsUser")
+		yamlx.Set(yamlx.Get(c, "securityContext"), "runAsNonRoot", yamlx.Bool(true))
+	})
+	if want := "kind: Pod\nspec:\n  containers:\n  - name: a\n    securityContext: {runAsNonRoot: true}\n"; got != want {
+		t.Errorf("got:\n%s\nwant:\n%s", got, want)
+	}
+}
+
+func TestFixKeepsWindowsLineEndingsInEdits(t *testing.T) {
+	src := "kind: Pod\r\nspec:\r\n  containers:\r\n  - name: a\r\n    image: x\r\n"
+	got := fixed(t, src, func(d *yaml.Node) {
+		yamlx.Set(yamlx.Items(yamlx.Path(d, "spec", "containers"))[0], "imagePullPolicy", yamlx.Str("Always"))
+	})
+	if want := "kind: Pod\r\nspec:\r\n  containers:\r\n  - name: a\r\n    imagePullPolicy: Always\r\n    image: x\r\n"; got != want {
+		t.Errorf("got %q, want %q", got, want)
+	}
+}
+
+func TestCompactLists(t *testing.T) {
+	for src, want := range map[string]bool{
+		"a:\n- x\nb:\n- y\n":            true,
+		"a:\n  - x\nb:\n  - y\n":        false,
+		"a:\n  - x\nb:\n- y\nc:\n- z\n": true,
+		"a: [x]\nb: c\n":                true, // no block lists
+	} {
+		var d yaml.Node
+		if err := yaml.Unmarshal([]byte(src), &d); err != nil {
+			t.Fatal(err)
+		}
+		if got := compactLists(&d); got != want {
+			t.Errorf("compactLists(%q) = %v, want %v", src, got, want)
+		}
 	}
 }

@@ -83,8 +83,8 @@ New here? **[Try it](docs/try-it.md)** walks through everything with the example
 ```bash
 k8s-guardian check -f k8s/                        # check files, directories, Helm charts, Kustomize
 k8s-guardian check -f k8s/ --fix                  # apply the safe fixes in place
-k8s-guardian check -f k8s/ --update-baseline      # existing repo? record today's findings...
-k8s-guardian check -f k8s/ --baseline .k8s-guardian-baseline.json   # ...and fail only on new ones
+k8s-guardian init -f k8s/                         # existing repo: config, baseline of today's findings
+                                                  # (only new ones fail) and a GitHub workflow
 k8s-guardian check -f k8s/ --live -n prod         # will it fit the cluster?
 k8s-guardian diff -f k8s/ -n prod                 # what breaks if I apply it?
 k8s-guardian export vap > guardrails.yaml         # enforce the same rules at admission

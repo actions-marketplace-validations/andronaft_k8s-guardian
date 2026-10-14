@@ -142,7 +142,7 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 		if err != nil || done {
 			return exitFor(err), err
 		}
-		if err := report.Write(a.Stdout, f.format, fs, report.Summarize(fs), false); err != nil {
+		if err := report.Write(a.Stdout, f.format, fs, report.Summarize(fs), false, opts.Rules()...); err != nil {
 			return ExitError, err
 		}
 		if err := githubExtras(f.format, fs); err != nil {
@@ -209,7 +209,7 @@ func (a *App) process(ctx context.Context, files []*manifest.File, f *flags, opt
 	if f.format == "github" && len(fixedYAML) == 0 {
 		out = a.Stdout // the runner reads workflow commands from stdout
 	}
-	if err := report.Write(out, f.format, remaining, s, true); err != nil {
+	if err := report.Write(out, f.format, remaining, s, true, opts.Rules()...); err != nil {
 		return ExitError, err
 	}
 	if err := githubExtras(f.format, remaining); err != nil {
