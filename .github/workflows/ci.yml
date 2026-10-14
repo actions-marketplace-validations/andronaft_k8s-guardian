@@ -109,6 +109,12 @@ jobs:
           path: examples/insecure-deployment.yaml examples/costly-app.yaml
           rules: examples/rules
           sarif-file: k8s-guardian.sarif
+      - name: Findings that are already on main are not new
+        uses: ./
+        with:
+          path: examples/insecure-deployment.yaml
+          new-only: "true"
+          base-ref: main
       - name: Verify outcomes
         env:
           SECURE_ERRORS: ${{ steps.secure.outputs.errors }}

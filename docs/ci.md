@@ -48,8 +48,14 @@ The action runs in the repository root, so a [`.k8s-guardian.yaml`](configuratio
 | `sarif-file` | | Also write SARIF, for `github/codeql-action/upload-sarif` |
 | `cost` | `false` | Add a monthly cost estimate to the job summary |
 | `args` | | Extra arguments for `k8s-guardian check`, e.g. `--values values-prod.yaml` |
+| `new-only` | `false` | On pull requests, report only findings the pull request adds (see below) |
+| `base-ref` | the PR's base branch | Branch `new-only` compares with |
 
 Outputs: `errors`, `warnings`, `infos`, `fixable`, `sarif-file`.
+
+### Only what the pull request adds
+
+With `new-only: "true"`, the action first checks the same paths on the pull request's base branch (fetched into a separate worktree, with the base's config and the same rules). Findings that are already there count as known, like a [baseline](configuration.md#baseline), so a pull request fails only on problems it introduces, and nobody has to maintain a baseline file. Live findings (`live: "true"`) are always reported. When the base branch can't be checked (for example, the paths are new in this pull request), everything is reported with a warning.
 
 ### Code scanning (SARIF)
 
