@@ -5,7 +5,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/andronaft/k8s-guardian/internal/rules"
@@ -44,7 +46,9 @@ func Summarize(fs []rules.Finding) Summary {
 }
 
 // Write renders findings in the given format ("text", "json", "sarif").
-func Write(w io.Writer, format string, fs []rules.Finding, s Summary, fixMode bool) error {
+// Write renders findings in format. extra lists rules SARIF describes in
+// addition to the built-in, live and diff rules (custom rules).
+func Write(w io.Writer, format string, fs []rules.Finding, s Summary, fixMode bool, extra ...*rules.Rule) error {
 	switch format {
 	case "json":
 		enc := json.NewEncoder(w)
@@ -57,7 +61,7 @@ func Write(w io.Writer, format string, fs []rules.Finding, s Summary, fixMode bo
 			Summary  Summary         `json:"summary"`
 		}{fs, s})
 	case "sarif":
-		return writeSARIF(w, fs)
+		return writeSARIF(w, fs, extra)
 	case "github":
 		WriteGitHub(w, fs)
 		return nil
@@ -159,20 +163,32 @@ var extraRules []*rules.Rule
 // RegisterRules adds non built-in rules (live, diff) to SARIF output.
 func RegisterRules(rs ...*rules.Rule) { extraRules = append(extraRules, rs...) }
 
-func writeSARIF(w io.Writer, fs []rules.Finding) error {
+func writeSARIF(w io.Writer, fs []rules.Finding, extra []*rules.Rule) error {
 	type msg struct {
 		Text string `json:"text"`
 	}
 	var sarifRules []map[string]any
-	for _, r := range append(append([]*rules.Rule{}, rules.All...), extraRules...) {
+	described := map[string]bool{}
+	describe := func(id, name, description string, sev rules.Severity) {
+		if described[id] {
+			return
+		}
+		described[id] = true
 		sarifRules = append(sarifRules, map[string]any{
-			"id":               r.ID,
-			"name":             r.Name,
-			"shortDescription": msg{r.Description},
+			"id":               id,
+			"name":             name,
+			"shortDescription": msg{description},
 			"defaultConfiguration": map[string]string{
-				"level": sarifLevel(r.Severity),
+				"level": sarifLevel(sev),
 			},
 		})
+	}
+	for _, r := range append(append(append([]*rules.Rule{}, rules.All...), extraRules...), extra...) {
+		describe(r.ID, r.Name, r.Description, r.Severity)
+	}
+	// Every result needs a rule descriptor, even for a rule nobody passed in.
+	for _, f := range fs {
+		describe(f.RuleID, f.Rule, f.Rule, f.Severity)
 	}
 	results := []map[string]any{}
 	for _, f := range fs {
@@ -190,7 +206,7 @@ func writeSARIF(w io.Writer, fs []rules.Finding) error {
 			"message": msg{m},
 			"locations": []any{map[string]any{
 				"physicalLocation": map[string]any{
-					"artifactLocation": map[string]string{"uri": f.Source},
+					"artifactLocation": map[string]string{"uri": sarifURI(f.Source)},
 					"region":           map[string]int{"startLine": line},
 				},
 			}},
@@ -211,6 +227,29 @@ func writeSARIF(w io.Writer, fs []rules.Finding) error {
 	enc := json.NewEncoder(w)
 	enc.SetIndent("", "  ")
 	return enc.Encode(doc)
+}
+
+// sarifURI turns a finding's source into the URI code scanning expects: a
+// path relative to the working directory (the repository root in CI) with
+// "/" separators, or a file:// URI for a file outside it.
+func sarifURI(src string) string {
+	if !filepath.IsAbs(src) && !strings.HasPrefix(filepath.Clean(src), "..") {
+		return strings.TrimPrefix(filepath.ToSlash(filepath.Clean(src)), "./")
+	}
+	abs, err := filepath.Abs(src)
+	if err != nil {
+		return filepath.ToSlash(src)
+	}
+	if wd, err := os.Getwd(); err == nil {
+		if rel, err := filepath.Rel(wd, abs); err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+			return filepath.ToSlash(rel)
+		}
+	}
+	p := filepath.ToSlash(abs)
+	if !strings.HasPrefix(p, "/") {
+		p = "/" + p // C:/x -> /C:/x
+	}
+	return (&url.URL{Scheme: "file", Path: p}).String()
 }
 
 func sarifLevel(s rules.Severity) string {
