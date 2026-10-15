@@ -81,6 +81,58 @@ func TestInit(t *testing.T) {
 	}
 }
 
+// An existing config keeps its name (a new .yaml would take precedence over
+// a .yml) and decides where the baseline goes.
+func TestInitKeepsExistingConfig(t *testing.T) {
+	repo(t, mustAbs(t, insecure))
+	cfg := "baseline: ci/known.json\nskip: [KG010]\n"
+	if err := os.WriteFile(".k8s-guardian.yml", []byte(cfg), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runVersion(t, "dev", "init", "-f", "k8s", "--no-workflow")
+	known := filepath.FromSlash("ci/known.json")
+	if code != 0 || !strings.Contains(out, "wrote    "+known) || !strings.Contains(out, "git add "+known+"\n") {
+		t.Fatalf("init exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(known); err != nil {
+		t.Errorf("baseline not where the config names it: %v", err)
+	}
+	for _, f := range []string{".k8s-guardian.yaml", ".k8s-guardian-baseline.json"} {
+		if _, err := os.Stat(f); err == nil {
+			t.Errorf("%s written next to the existing config", f)
+		}
+	}
+	if b, _ := os.ReadFile(".k8s-guardian.yml"); string(b) != cfg {
+		t.Errorf("config changed:\n%s", b)
+	}
+	if code, _, stderr := run(t, "check", "-f", "k8s"); code != 0 {
+		t.Errorf("check after init: exit %d\n%s", code, stderr)
+	}
+
+	// --force replaces the config, so its skip list doesn't shape the
+	// baseline either.
+	if code, out = runVersion(t, "dev", "init", "-f", "k8s", "--no-workflow", "--force"); code != 0 || !strings.Contains(out, "wrote    .k8s-guardian.yml\n") {
+		t.Fatalf("init --force exit %d:\n%s", code, out)
+	}
+	if code, _, stderr := run(t, "check", "-f", "k8s"); code != 0 {
+		t.Errorf("check after init --force: exit %d\n%s", code, stderr)
+	}
+}
+
+func TestInitConfigWithoutBaseline(t *testing.T) {
+	repo(t, mustAbs(t, insecure))
+	if err := os.WriteFile(".k8s-guardian.yaml", []byte("failOn: error\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	code, out := runVersion(t, "dev", "init", "-f", "k8s", "--no-workflow")
+	if code != 0 || !strings.Contains(out, "names no baseline") {
+		t.Fatalf("init exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(".k8s-guardian-baseline.json"); err == nil {
+		t.Error("baseline written that the config doesn't use")
+	}
+}
+
 func TestInitCleanRepository(t *testing.T) {
 	repo(t, mustAbs(t, secure))
 	if code, out := runVersion(t, "dev", "init", "--no-workflow"); code != 0 || !strings.Contains(out, "0 finding(s)") {

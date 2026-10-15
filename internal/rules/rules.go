@@ -286,7 +286,7 @@ var All = []*Rule{
 				return nil
 			}
 			// An HorizontalPodAutoscaler decides the replica count.
-			if hpa := set.hpaFor(o); hpa != nil {
+			if hpa := set.HPAFor(o); hpa != nil {
 				min := yamlx.String(hpa.Root, "spec", "minReplicas")
 				if min == "" {
 					min = "1" // the API default

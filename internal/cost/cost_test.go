@@ -66,3 +66,24 @@ spec:
 		t.Errorf("rollout pod regex %q does not match", got)
 	}
 }
+
+// A native sidecar runs as long as the pod, so it adds to the pod's cost.
+func TestSidecarCost(t *testing.T) {
+	ws := estimate(t, `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: shop}
+spec:
+  template:
+    spec:
+      initContainers:
+        - {name: migrate, image: m:1, resources: {requests: {cpu: 500m, memory: 256Mi}}}
+        - {name: proxy, image: p:1, restartPolicy: Always, resources: {requests: {cpu: "1", memory: 1Gi}}}
+      containers: [{name: web, image: nginx:1.27, resources: {requests: {cpu: "1", memory: 1Gi}}}]
+`)
+	if len(ws) != 1 || ws[0].PodCPU != 2000 || ws[0].PodMemory != 2<<30 {
+		t.Fatalf("pod requests: %+v", ws[0])
+	}
+	if c := ws[0].Containers[1]; !c.Init || !c.Sidecar {
+		t.Errorf("proxy: %+v", c)
+	}
+}

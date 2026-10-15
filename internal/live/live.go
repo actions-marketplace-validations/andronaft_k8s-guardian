@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -52,6 +53,7 @@ type checker struct {
 	objs   []*manifest.Object
 	defNS  string
 	opts   rules.Options
+	set    *rules.Set
 	res    *Result
 	noted  map[string]bool
 	quotas map[string]map[string]int64 // ns/quota/key -> consumed by this run
@@ -64,7 +66,7 @@ type checker struct {
 // Check runs all live checks. namespace overrides the namespace for objects
 // that don't set one (like `kubectl apply -n`).
 func Check(c cluster.Cluster, objs []*manifest.Object, namespace string, opts rules.Options) *Result {
-	ch := &checker{c: c, objs: objs, opts: opts, res: &Result{}, noted: map[string]bool{}, quotas: map[string]map[string]int64{}}
+	ch := &checker{c: c, objs: objs, opts: opts, set: rules.NewSet(objs), res: &Result{}, noted: map[string]bool{}, quotas: map[string]map[string]int64{}}
 	ch.defNS = namespace
 	if ch.defNS == "" {
 		ch.defNS = c.DefaultNamespace()
@@ -373,6 +375,28 @@ func replicas(t *rules.Target, nodes int) int64 {
 	return 1
 }
 
+// scaled applies the HorizontalPodAutoscaler of the manifest set: it
+// scales the workload into [minReplicas, maxReplicas] right away, unless it
+// runs 0 replicas (that turns autoscaling off).
+func (ch *checker) scaled(o *manifest.Object, n int64) int64 {
+	hpa := ch.set.HPAFor(o)
+	if hpa == nil || n == 0 {
+		return n
+	}
+	lo, hi := int64(1), int64(0)
+	if v, err := strconv.ParseInt(yamlx.String(hpa.Root, "spec", "minReplicas"), 10, 64); err == nil {
+		lo = v
+	}
+	if v, err := strconv.ParseInt(yamlx.String(hpa.Root, "spec", "maxReplicas"), 10, 64); err == nil {
+		hi = v
+	}
+	n = max(n, lo)
+	if hi > 0 {
+		n = min(n, hi)
+	}
+	return n
+}
+
 var quotaKeys = map[string]struct {
 	res string // cpu | memory | pods
 	lim bool
@@ -387,7 +411,7 @@ func (ch *checker) quota(t *rules.Target, ns *cluster.Namespace, pr podRes, node
 	if len(ns.Quotas) == 0 {
 		return
 	}
-	n := replicas(t, nodes)
+	n := ch.scaled(t.Obj, replicas(t, nodes))
 	demand := func(p podRes, r int64) map[string]int64 {
 		d := map[string]int64{"pods": r}
 		for q, k := range quotaKeys {

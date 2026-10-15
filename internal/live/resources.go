@@ -19,7 +19,8 @@ type ctrRes struct {
 }
 
 // podRes holds the effective pod-level requests/limits after Kubernetes
-// defaulting (limits -> requests) and LimitRange defaults.
+// defaulting (limits -> requests) and LimitRange defaults, with sidecars
+// counted like the scheduler and ResourceQuota do.
 type podRes struct {
 	req, lim   map[string]int64
 	missingReq map[string][]string // resource -> containers without a request
@@ -41,7 +42,10 @@ func podResources(t *rules.Target, lrs []cluster.LimitRangeItem) podRes {
 		}
 	}
 	pr := podRes{req: map[string]int64{}, lim: map[string]int64{}, missingReq: map[string][]string{}, missingLim: map[string][]string{}}
+	// The scheduler's formula: app containers plus sidecars, or the largest
+	// init container plus the sidecars started before it, if that is more.
 	initReq, initLim := map[string]int64{}, map[string]int64{}
+	sideReq, sideLim := map[string]int64{}, map[string]int64{}
 	for _, c := range t.Containers {
 		cr := ctrRes{name: c.Name, init: c.Init, req: map[string]int64{}, lim: map[string]int64{}}
 		for _, key := range []string{cpuKey, memKey} {
@@ -69,10 +73,16 @@ func podResources(t *rules.Target, lrs []cluster.LimitRangeItem) podRes {
 			} else {
 				pr.missingLim[key] = append(pr.missingLim[key], c.Name)
 			}
-			if c.Init {
-				initReq[key] = max(initReq[key], cr.req[key])
-				initLim[key] = max(initLim[key], cr.lim[key])
-			} else {
+			switch {
+			case c.Sidecar():
+				sideReq[key] += cr.req[key]
+				sideLim[key] += cr.lim[key]
+				pr.req[key] += cr.req[key]
+				pr.lim[key] += cr.lim[key]
+			case c.Init:
+				initReq[key] = max(initReq[key], cr.req[key]+sideReq[key])
+				initLim[key] = max(initLim[key], cr.lim[key]+sideLim[key])
+			default:
 				pr.req[key] += cr.req[key]
 				pr.lim[key] += cr.lim[key]
 			}

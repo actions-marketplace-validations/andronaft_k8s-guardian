@@ -9,7 +9,7 @@ k8s-guardian init -f k8s/
 `init` writes three files and never overwrites existing ones (`--force` does):
 
 * `.k8s-guardian.yaml`, a commented [config file](configuration.md);
-* `.k8s-guardian-baseline.json` with the findings the repository has today, so CI passes from the first run and fails only on new problems (no file when there are none);
+* `.k8s-guardian-baseline.json` with the findings the repository has today, so CI passes from the first run and fails only on new problems (no file when there are none). With a config already in place, `init` keeps it and writes the baseline where it says;
 * `.github/workflows/k8s-guardian.yml`, the workflow below, pinned to your version (`--no-workflow` skips it).
 
 ## GitHub Action
@@ -55,7 +55,7 @@ Outputs: `errors`, `warnings`, `infos`, `fixable`, `sarif-file`.
 
 ### Only what the pull request adds
 
-With `new-only: "true"`, the action first checks the same paths on the pull request's base branch (fetched into a separate worktree, with the base's config and the same rules). Findings that are already there count as known, like a [baseline](configuration.md#baseline), so a pull request fails only on problems it introduces, and nobody has to maintain a baseline file. Live findings (`live: "true"`) are always reported. When the base branch can't be checked (for example, the paths are new in this pull request), everything is reported with a warning.
+With `new-only: "true"`, the action first checks the same paths on the pull request's base branch (fetched into a separate worktree, with the base's config and the same rules). Findings that are already there count as known, like a [baseline](configuration.md#baseline), so a pull request fails only on problems it introduces, and nobody has to maintain a baseline file. Live findings (`live: "true"`) are always reported. A path the pull request adds has nothing to compare with, so all of its findings are new. When the base branch can't be fetched or checked, everything is reported with a warning.
 
 ### Code scanning (SARIF)
 

@@ -113,8 +113,17 @@ runs:
         INPUT_BASE_REF: ${{ inputs.base-ref }}
       run: |
         set -uo pipefail
+        paths=()
+        for p in $INPUT_PATH; do
+          # new-only compares findings across two checkouts, so paths inside
+          # the working directory must be relative in both.
+          if [ "$INPUT_NEW_ONLY" = "true" ]; then
+            if [ "$p" = "$PWD" ]; then p=.; else p="${p#"$PWD"/}"; fi
+          fi
+          paths+=("$p")
+        done
         files=()
-        for p in $INPUT_PATH; do files+=(-f "$p"); done
+        for p in "${paths[@]}"; do files+=(-f "$p"); done
         ruleargs=()
         if [ -n "$INPUT_SKIP" ]; then ruleargs+=(--skip "$INPUT_SKIP"); fi
         for r in $INPUT_RULES; do ruleargs+=(--rules "$r"); done
@@ -129,15 +138,31 @@ runs:
             echo "::notice::new-only: no base branch (not a pull request), reporting all findings"
           else
             # Check the same paths on the base branch; what it finds is not new.
-            base="$RUNNER_TEMP/k8s-guardian-base"
-            known="$RUNNER_TEMP/k8s-guardian-base.json"
+            # Unique directories, so the action can run more than once a job.
+            tmp=$(mktemp -d "$RUNNER_TEMP/k8s-guardian-base.XXXXXX")
+            base="$tmp/tree" known="$tmp/known.json"
+            prefix=$(git rev-parse --show-prefix 2>/dev/null)
             if git fetch --quiet --no-tags --depth=1 origin "$INPUT_BASE_REF" &&
-              git worktree add --quiet --detach "$base" FETCH_HEAD &&
-              (cd "$base" && k8s-guardian check "${files[@]}" "${ruleargs[@]}" "${extra[@]}" --update-baseline --baseline "$known" > /dev/null); then
-              args+=(--baseline "$known")
-              echo "Reporting only findings that are not on $INPUT_BASE_REF."
+              git worktree add --quiet --detach "$base" FETCH_HEAD; then
+              # Only paths that exist there: one added by the pull request
+              # has nothing to compare with, so all its findings are new. An
+              # absolute path outside the repository can't be compared.
+              basefiles=()
+              for p in "${paths[@]}"; do
+                case "$p" in /*) continue ;; esac
+                if [ -e "$base/$prefix$p" ]; then basefiles+=(-f "$p"); fi
+              done
+              if [ ${#basefiles[@]} -eq 0 ]; then
+                echo "The checked paths don't exist on $INPUT_BASE_REF: every finding is new."
+              elif (cd "$base/$prefix" && k8s-guardian check "${basefiles[@]}" "${ruleargs[@]}" "${extra[@]}" --update-baseline --baseline "$known" > /dev/null); then
+                args+=(--baseline "$known")
+                echo "Reporting only findings that are not on $INPUT_BASE_REF."
+              else
+                echo "::warning::new-only: could not check $INPUT_BASE_REF, reporting all findings"
+              fi
+              git worktree remove --force "$base" || true
             else
-              echo "::warning::new-only: could not check $INPUT_BASE_REF (are the paths new in this pull request?), reporting all findings"
+              echo "::warning::new-only: could not fetch $INPUT_BASE_REF, reporting all findings"
             fi
           fi
         fi
