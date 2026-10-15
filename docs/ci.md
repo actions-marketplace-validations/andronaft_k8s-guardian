@@ -55,7 +55,7 @@ Outputs: `errors`, `warnings`, `infos`, `fixable`, `sarif-file`.
 
 ### Only what the pull request adds
 
-With `new-only: "true"`, the action first checks the same paths on the pull request's base branch (fetched into a separate worktree, with the base's config and the same rules). Findings that are already there count as known, like a [baseline](configuration.md#baseline), so a pull request fails only on problems it introduces, and nobody has to maintain a baseline file. Live findings (`live: "true"`) are always reported. When the base branch can't be checked (for example, the paths are new in this pull request), everything is reported with a warning.
+With `new-only: "true"`, the action first checks the same paths on the pull request's base branch (fetched into a separate worktree, with the base's config and the same rules). Findings that are already there count as known, like a [baseline](configuration.md#baseline), so a pull request fails only on problems it introduces, and nobody has to maintain a baseline file. Live findings (`live: "true"`) are always reported. A path the pull request adds has nothing to compare with, so all of its findings are new. When the base branch can't be fetched or checked, everything is reported with a warning.
 
 ### Code scanning (SARIF)
 
