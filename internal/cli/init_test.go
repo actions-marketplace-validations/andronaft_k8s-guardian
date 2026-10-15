@@ -90,8 +90,12 @@ func TestInitKeepsExistingConfig(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, out := runVersion(t, "dev", "init", "-f", "k8s", "--no-workflow")
-	if code != 0 || !strings.Contains(out, "wrote    ci/known.json") || !strings.Contains(out, "git add ci/known.json\n") {
+	known := filepath.FromSlash("ci/known.json")
+	if code != 0 || !strings.Contains(out, "wrote    "+known) || !strings.Contains(out, "git add "+known+"\n") {
 		t.Fatalf("init exit %d:\n%s", code, out)
+	}
+	if _, err := os.Stat(known); err != nil {
+		t.Errorf("baseline not where the config names it: %v", err)
 	}
 	for _, f := range []string{".k8s-guardian.yaml", ".k8s-guardian-baseline.json"} {
 		if _, err := os.Stat(f); err == nil {
