@@ -9,7 +9,7 @@ k8s-guardian init -f k8s/
 `init` writes three files and never overwrites existing ones (`--force` does):
 
 * `.k8s-guardian.yaml`, a commented [config file](configuration.md);
-* `.k8s-guardian-baseline.json` with the findings the repository has today, so CI passes from the first run and fails only on new problems (no file when there are none);
+* `.k8s-guardian-baseline.json` with the findings the repository has today, so CI passes from the first run and fails only on new problems (no file when there are none). With a config already in place, `init` keeps it and writes the baseline where it says;
 * `.github/workflows/k8s-guardian.yml`, the workflow below, pinned to your version (`--no-workflow` skips it).
 
 ## GitHub Action
