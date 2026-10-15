@@ -42,6 +42,20 @@ func (a *App) initRepo(args []string) (int, error) {
 		}
 	}
 
+	// An existing config, under any name check looks for, keeps that name:
+	// a second file would take precedence over it. --force replaces it, so
+	// its settings don't apply to the baseline either.
+	cfg, existing := config.Names[0], false
+	for _, n := range config.Names {
+		if _, err := os.Stat(n); err == nil {
+			cfg, existing = n, true
+			break
+		}
+	}
+	if existing && *force {
+		f.cfg = &config.Config{}
+	}
+
 	// Record today's findings with the rules a check will use.
 	files, err := f.loadInputs(nil, a.Stderr)
 	if err != nil {
@@ -79,28 +93,37 @@ func (a *App) initRepo(args []string) (int, error) {
 		return nil
 	}
 
-	cfg := config.Names[0]
+	base := defaultBaseline
 	useBaseline := len(findings) > 0
-	if _, err := os.Stat(cfg); err == nil && !*force {
-		// The existing config decides; only record a baseline it names.
-		c, err := config.Load(cfg)
-		if err != nil {
-			return ExitError, err
-		}
-		useBaseline = useBaseline && c.Baseline != ""
-	}
 	if err := write(cfg, []byte(configTemplate(useBaseline))); err != nil {
 		return ExitError, err
 	}
+	if existing && !*force {
+		// The existing config decides: record a baseline only where it
+		// names one.
+		c, err := f.config()
+		if err != nil {
+			return ExitError, err
+		}
+		if c.Baseline != "" {
+			base = c.Baseline
+		} else if useBaseline {
+			fmt.Fprintf(a.Stderr, "note     %s names no baseline, so CI fails on today's findings: add \"baseline: %s\" to it and run init again\n", cfg, defaultBaseline)
+		}
+		useBaseline = useBaseline && c.Baseline != ""
+	}
 	if useBaseline {
-		if _, err := os.Stat(defaultBaseline); err == nil && !*force {
-			fmt.Fprintf(a.Stderr, "kept     %s (exists; --force overwrites it)\n", defaultBaseline)
+		if _, err := os.Stat(base); err == nil && !*force {
+			fmt.Fprintf(a.Stderr, "kept     %s (exists; --force overwrites it)\n", base)
 		} else {
-			if err := baseline.Write(defaultBaseline, findings); err != nil {
+			if err := os.MkdirAll(filepath.Dir(base), 0o750); err != nil {
 				return ExitError, err
 			}
-			wrote[defaultBaseline] = true
-			fmt.Fprintf(a.Stderr, "wrote    %s (%d existing finding(s): they won't fail CI, new ones will)\n", defaultBaseline, len(findings))
+			if err := baseline.Write(base, findings); err != nil {
+				return ExitError, err
+			}
+			wrote[base] = true
+			fmt.Fprintf(a.Stderr, "wrote    %s (%d existing finding(s): they won't fail CI, new ones will)\n", base, len(findings))
 		}
 	}
 	if !*noWorkflow {
@@ -112,7 +135,7 @@ func (a *App) initRepo(args []string) (int, error) {
 	fmt.Fprintf(a.Stderr, "\nChecked %d object(s) in %s: %d finding(s).\n", objects, strings.Join(f.files, " "), len(findings))
 	if len(wrote) > 0 {
 		var paths []string
-		for _, p := range []string{cfg, defaultBaseline, workflowPath} {
+		for _, p := range []string{cfg, base, workflowPath} {
 			if wrote[p] {
 				paths = append(paths, p)
 			}
