@@ -55,6 +55,7 @@ type Container struct {
 	Name     string `json:"name"`
 	Image    string `json:"image"`
 	Init     bool   `json:"init,omitempty"`
+	Sidecar  bool   `json:"sidecar,omitempty"` // an init container that keeps running
 	MilliCPU int64  `json:"milliCpu"`
 	Memory   int64  `json:"memoryBytes"`
 	Missing  bool   `json:"missingRequests,omitempty"`
@@ -118,9 +119,9 @@ func Estimate(objs []*manifest.Object, p Pricing) []*Workload {
 			continue
 		}
 		w := &Workload{Resource: o.Ref(), Source: o.Source, Namespace: o.Namespace(), Kind: o.Kind(), target: t}
-		var sumCPU, sumMem, initCPU, initMem int64
+		var sumCPU, sumMem, initCPU, initMem, sideCPU, sideMem int64
 		for _, c := range t.Containers {
-			cc := Container{Name: c.Name, Image: yamlx.String(c.Node, "image"), Init: c.Init, node: c}
+			cc := Container{Name: c.Name, Image: yamlx.String(c.Node, "image"), Init: c.Init, Sidecar: c.Sidecar(), node: c}
 			cpu := yamlx.String(c.Node, "resources", "requests", "cpu")
 			mem := yamlx.String(c.Node, "resources", "requests", "memory")
 			// Kubernetes defaults requests to limits when only limits are set.
@@ -142,9 +143,15 @@ func Estimate(objs []*manifest.Object, p Pricing) []*Workload {
 			if cc.Memory >= 4<<30 {
 				w.Notes = append(w.Notes, fmt.Sprintf("container %q requests %s memory: make sure it really uses it", c.Name, quantity.FormatBytes(cc.Memory)))
 			}
-			if c.Init {
-				initCPU, initMem = max(initCPU, cc.MilliCPU), max(initMem, cc.Memory)
-			} else {
+			// Like the scheduler: sidecars run next to the app containers,
+			// an init container next to the sidecars started before it.
+			switch {
+			case cc.Sidecar:
+				sideCPU, sideMem = sideCPU+cc.MilliCPU, sideMem+cc.Memory
+				sumCPU, sumMem = sumCPU+cc.MilliCPU, sumMem+cc.Memory
+			case c.Init:
+				initCPU, initMem = max(initCPU, cc.MilliCPU+sideCPU), max(initMem, cc.Memory+sideMem)
+			default:
 				sumCPU += cc.MilliCPU
 				sumMem += cc.Memory
 			}
@@ -236,7 +243,7 @@ func RightSize(ctx context.Context, client *ai.Client, ws []*Workload, p Pricing
 			continue
 		}
 		saving := (p.Monthly(c.MilliCPU, c.Memory) - p.Monthly(cpu, mem)) * float64(w.MinReplicas)
-		if c.Init {
+		if c.Init && !c.Sidecar {
 			saving = 0 // init containers rarely drive the pod's effective request
 		}
 		out = append(out, Advice{Recommendation: r, Current: *c, Savings: saving})
@@ -355,7 +362,7 @@ func AttachUsage(ws []*Workload, src UsageSource, defaultNS string, p Pricing) [
 		for i := range w.Containers {
 			ct := &w.Containers[i]
 			u, ok := usage[ct.Name]
-			if !ok || ct.Init {
+			if !ok || ct.Init && !ct.Sidecar {
 				continue
 			}
 			ct.UsedCPU, _ = quantity.MilliCPU(u.CPU)

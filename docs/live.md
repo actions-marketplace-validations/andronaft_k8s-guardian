@@ -20,7 +20,7 @@ examples/costly-app.yaml  Deployment/orders-api
 | LV001 | apiVersion served by the cluster (CRD installed? API removed in this version?) |
 | LV002 | Namespace exists, or is created by the same manifest set |
 | LV003 | Some node the pod can be scheduled on can fit its requests (and has them free: a warning otherwise). Like the scheduler, it skips cordoned nodes, nodes that don't match `nodeSelector` or required node affinity, and nodes with a `NoSchedule`/`NoExecute` taint the pod doesn't tolerate, and the message names which nodes were excluded and why |
-| LV004 | Enough ResourceQuota is left for the *delta* against what is already running, and quota-mandated requests/limits are set (LimitRange defaults are taken into account) |
+| LV004 | Enough ResourceQuota is left for the *delta* against what is already running, and quota-mandated requests/limits are set (LimitRange defaults are taken into account). An HPA in the manifest set decides the replica count: it scales to `minReplicas` right away |
 | LV005 | Requests/limits within LimitRange min/max |
 | LV006 | Referenced ConfigMaps, Secrets, ServiceAccounts, PVCs and PriorityClasses exist in the cluster or in the manifest set |
 | LV007 | StorageClass exists, or the cluster has a default one |
@@ -31,6 +31,8 @@ Everything is read-only (`kubectl get`). Checks that RBAC doesn't allow are skip
 ✖ error   LV003  pod requests 8 CPU but the largest matching node (node-a) has 3920m allocatable;
                  nodes with enough room are excluded (taint dedicated=gpu:NoSchedule: gpu-1): pods will stay Pending
 ```
+
+A pod's requests are counted like the scheduler and ResourceQuota count them: the containers plus native sidecars (init containers with `restartPolicy: Always`, which keep running), or an init container plus the sidecars started before it, if that is more.
 
 DaemonSet pods tolerate cordoned and not-ready nodes, as the DaemonSet controller adds those tolerations. Pods with `nodeName` bypass the scheduler, so for them only `NoExecute` taints count. A DaemonSet that no node accepts is a warning ("runs no pods"), because it creates no pods rather than Pending ones.
 

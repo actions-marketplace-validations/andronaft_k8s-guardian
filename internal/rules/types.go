@@ -72,6 +72,13 @@ type Container struct {
 	Init bool
 }
 
+// Sidecar reports whether c is a native sidecar: an init container with
+// restartPolicy Always, which keeps running next to the app containers, so
+// its requests add to theirs.
+func (c *Container) Sidecar() bool {
+	return c.Init && yamlx.String(c.Node, "restartPolicy") == "Always"
+}
+
 // Target is a workload resource with a pod spec.
 type Target struct {
 	Obj        *manifest.Object

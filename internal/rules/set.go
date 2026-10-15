@@ -38,8 +38,9 @@ func (s *Set) workloadsIn(ns string) []workload {
 	return s.workloads[ns]
 }
 
-// hpaFor returns the HorizontalPodAutoscaler that scales o, if any.
-func (s *Set) hpaFor(o *manifest.Object) *manifest.Object {
+// HPAFor returns the HorizontalPodAutoscaler in the set that scales o, if
+// any.
+func (s *Set) HPAFor(o *manifest.Object) *manifest.Object {
 	key := func(ns, kind, name string) string { return ns + "\x00" + kind + "\x00" + name }
 	if s.hpas == nil {
 		s.hpas = map[string]*manifest.Object{}

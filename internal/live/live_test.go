@@ -128,6 +128,44 @@ func TestQuotaCountsOnlyDelta(t *testing.T) {
 	}
 }
 
+// An HPA in the set scales the Deployment to minReplicas right away, so the
+// quota has to hold that many pods, not spec.replicas.
+func TestQuotaCountsHPAMinReplicas(t *testing.T) {
+	deploy := strings.Replace(strings.Split(app, "---")[0], "replicas: 3", "replicas: 1", 1)
+	quota := func(docs string) []string {
+		f, err := manifest.Parse([]byte(docs), "app.yaml")
+		if err != nil {
+			t.Fatal(err)
+		}
+		var out []string
+		for _, fd := range Check(fake(), f.Objects, "", rules.NewOptions("")).Findings {
+			if fd.RuleID == "LV004" {
+				out = append(out, fd.Message)
+			}
+		}
+		return out
+	}
+	if got := quota(deploy); len(got) != 0 {
+		t.Fatalf("1 replica of 2 CPU fits into the 4 left: %v", got)
+	}
+	hpa := `---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: api, namespace: prod}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: api}
+  minReplicas: 3
+  maxReplicas: 10
+`
+	if got := quota(deploy + hpa); len(got) != 1 || !strings.Contains(got[0], "needs requests.cpu=6 more (3 replica(s))") {
+		t.Errorf("HPA minReplicas 3: %v", got)
+	}
+	// maxReplicas caps spec.replicas.
+	if got := quota(strings.Replace(deploy, "replicas: 1", "replicas: 20", 1) + strings.Replace(hpa, "maxReplicas: 10", "maxReplicas: 3", 1)); len(got) != 1 || !strings.Contains(got[0], "(3 replica(s))") {
+		t.Errorf("maxReplicas 3: %v", got)
+	}
+}
+
 func TestMissingNamespace(t *testing.T) {
 	c := fake()
 	delete(c.Namespaces, "staging")
@@ -304,5 +342,39 @@ func TestNodeFitFreeCapacity(t *testing.T) {
 	}
 	if got := run("StatefulSet", full, false); len(got) != 1 {
 		t.Errorf("new StatefulSet: %+v", got)
+	}
+}
+
+// sidecarPod has a native sidecar (restartPolicy Always) between two init
+// containers.
+const sidecarPod = `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: app, namespace: prod}
+spec:
+  template:
+    spec:
+      initContainers:
+        - {name: setup, image: setup:1, resources: {requests: {cpu: 500m, memory: 2Gi}}}
+        - {name: proxy, image: proxy:1, restartPolicy: Always, resources: {requests: {cpu: "2", memory: 512Mi}, limits: {cpu: "2", memory: 512Mi}}}
+        - {name: warm, image: warm:1, resources: {requests: {cpu: 2500m, memory: 256Mi}}}
+      containers:
+        - {name: app, image: app:1, resources: {requests: {cpu: "1", memory: 1Gi}, limits: {cpu: "1", memory: 1Gi}}}
+`
+
+// The scheduler and ResourceQuota count a sidecar next to the app
+// containers, and next to the init containers started after it.
+func TestPodResourcesCountSidecars(t *testing.T) {
+	f, err := manifest.Parse([]byte(sidecarPod), "app.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pr := podResources(rules.NewTarget(f.Objects[0]), nil)
+	// app 1 + proxy 2 = 3 CPU, but warm runs next to proxy: 2.5 + 2 = 4.5.
+	// Memory: setup's 2Gi beats app 1Gi + proxy 512Mi and warm 256Mi + 512Mi.
+	if pr.req[cpuKey] != 4500 || pr.req[memKey] != 2<<30 {
+		t.Errorf("requests: cpu %dm, memory %d", pr.req[cpuKey], pr.req[memKey])
+	}
+	if pr.lim[cpuKey] != 3000 || pr.lim[memKey] != 1536<<20 {
+		t.Errorf("limits: cpu %dm, memory %d", pr.lim[cpuKey], pr.lim[memKey])
 	}
 }
