@@ -83,9 +83,13 @@ jobs:
       - uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
+      # go run tool@latest builds the tool with the Go its own go.mod asks
+      # for, which can be older than this module's toolchain. Such a build
+      # can't type-check the newer standard library ("method must have no
+      # type parameters"), so the tools use at least the module's toolchain.
+      - name: Use the module's toolchain for the tools
+        run: echo "GOTOOLCHAIN=$(go env GOVERSION)+auto" >> "$GITHUB_ENV"
       - name: govulncheck
-        env:
-          GOTOOLCHAIN: auto
         run: go run golang.org/x/vuln/cmd/govulncheck@latest -show verbose ./...
       - name: gosec
         run: go run github.com/securego/gosec/v2/cmd/gosec@latest -quiet -exclude-dir=test ./...
