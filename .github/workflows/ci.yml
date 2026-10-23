@@ -125,13 +125,33 @@ jobs:
           path: ${{ github.workspace }}/examples/insecure-deployment.yaml
           new-only: "true"
           base-ref: main
+      - name: Record a baseline of the insecure manifest
+        run: k8s-guardian check -f examples/insecure-deployment.yaml --update-baseline --baseline "$RUNNER_TEMP/known.json"
+      - name: Known findings pass with the baseline input
+        id: baseline
+        uses: ./
+        with:
+          path: examples/insecure-deployment.yaml
+          baseline: ${{ runner.temp }}/known.json
+      - name: Helm values and set inputs render the chart (nginx:latest otherwise)
+        id: values
+        uses: ./
+        with:
+          path: internal/cli/testdata/chart
+          values: internal/cli/testdata/chart/values-prod.yaml
+          set: replicas=3
+          skip: KG001,KG002,KG003
       - name: Verify outcomes
         env:
           SECURE_ERRORS: ${{ steps.secure.outputs.errors }}
           INSECURE_OUTCOME: ${{ steps.insecure.outcome }}
           INSECURE_ERRORS: ${{ steps.insecure.outputs.errors }}
+          BASELINE_ERRORS: ${{ steps.baseline.outputs.errors }}
+          VALUES_ERRORS: ${{ steps.values.outputs.errors }}
         run: |
           test "$SECURE_ERRORS" = "0"
           test "$INSECURE_OUTCOME" = "failure"
           test "$INSECURE_ERRORS" -gt 0
+          test "$BASELINE_ERRORS" = "0"
+          test "$VALUES_ERRORS" = "0"
           jq -e '.runs[0].results | length > 0' k8s-guardian.sarif

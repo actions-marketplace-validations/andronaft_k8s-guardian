@@ -42,6 +42,22 @@ inputs:
     description: Extra arguments passed to `k8s-guardian check`.
     required: false
     default: ""
+  config:
+    description: Config file (`--config`). By default .k8s-guardian.yaml in the working directory applies, if present.
+    required: false
+    default: ""
+  baseline:
+    description: Baseline file of known findings (`--baseline`); only findings not in it are reported. Not used with new-only, which compares with the base branch instead.
+    required: false
+    default: ""
+  values:
+    description: Helm values files for charts in `path` (whitespace separated, `--values`).
+    required: false
+    default: ""
+  set:
+    description: Helm values for charts in `path`, as key=value (whitespace separated, `--set`).
+    required: false
+    default: ""
   new-only:
     description: Report only findings the pull request adds. The same paths are checked on the base branch first, and its findings are treated as a baseline. Without a base branch (not a pull request), everything is reported.
     required: false
@@ -109,6 +125,10 @@ runs:
         INPUT_SARIF_FILE: ${{ inputs.sarif-file }}
         INPUT_COST: ${{ inputs.cost }}
         INPUT_ARGS: ${{ inputs.args }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_VALUES: ${{ inputs.values }}
+        INPUT_SET: ${{ inputs.set }}
         INPUT_NEW_ONLY: ${{ inputs.new-only }}
         INPUT_BASE_REF: ${{ inputs.base-ref }}
       run: |
@@ -127,7 +147,11 @@ runs:
         ruleargs=()
         if [ -n "$INPUT_SKIP" ]; then ruleargs+=(--skip "$INPUT_SKIP"); fi
         for r in $INPUT_RULES; do ruleargs+=(--rules "$r"); done
+        if [ -n "$INPUT_CONFIG" ]; then ruleargs+=(--config "$INPUT_CONFIG"); fi
+        for v in $INPUT_VALUES; do ruleargs+=(--values "$v"); done
+        for kv in $INPUT_SET; do ruleargs+=(--set "$kv"); done
         args=("${ruleargs[@]}")
+        baseline="$INPUT_BASELINE"
         if [ "$INPUT_LIVE" = "true" ]; then args+=(--live); fi
         if [ -n "$INPUT_NAMESPACE" ]; then args+=(-n "$INPUT_NAMESPACE"); fi
         # shellcheck disable=SC2206 # extra args are intentionally word-split
@@ -155,7 +179,7 @@ runs:
               if [ ${#basefiles[@]} -eq 0 ]; then
                 echo "The checked paths don't exist on $INPUT_BASE_REF: every finding is new."
               elif (cd "$base/$prefix" && k8s-guardian check "${basefiles[@]}" "${ruleargs[@]}" "${extra[@]}" --update-baseline --baseline "$known" > /dev/null); then
-                args+=(--baseline "$known")
+                baseline="$known"
                 echo "Reporting only findings that are not on $INPUT_BASE_REF."
               else
                 echo "::warning::new-only: could not check $INPUT_BASE_REF, reporting all findings"
@@ -166,6 +190,8 @@ runs:
             fi
           fi
         fi
+
+        if [ -n "$baseline" ]; then args+=(--baseline "$baseline"); fi
 
         if [ -n "$INPUT_SARIF_FILE" ]; then
           k8s-guardian check "${files[@]}" "${args[@]}" "${extra[@]}" --format sarif --fail-on info > "$INPUT_SARIF_FILE" || true
