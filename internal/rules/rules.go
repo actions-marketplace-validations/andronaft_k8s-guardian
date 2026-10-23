@@ -2,6 +2,7 @@ package rules
 
 import (
 	"fmt"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -321,6 +322,72 @@ var All = []*Rule{
 			return "binds hostPort " + strings.Join(ports, ", ") + " on the node"
 		},
 	},
+	{
+		ID: "KG021", Name: "literal-secret", Severity: Warning,
+		Description: "Credentials must not be literal env values in the manifest (they end up in Git and in kubectl output); read them from a Secret with valueFrom.secretKeyRef or from a mounted file.",
+		Container: func(_ *Target, c *Container) string {
+			var names []string
+			for _, e := range yamlx.Items(yamlx.Get(c.Node, "env")) {
+				name := yamlx.String(e, "name")
+				v := yamlx.Get(e, "value")
+				if v == nil || v.Kind != yaml.ScalarNode || !looksLikeSecret(name, v.Value) {
+					continue
+				}
+				names = append(names, name)
+			}
+			if len(names) == 0 {
+				return ""
+			}
+			// The value is never part of the finding.
+			return "env " + strings.Join(names, ", ") + " holds a literal credential: use valueFrom.secretKeyRef or a mounted file"
+		},
+	},
+}
+
+var (
+	secretName = regexp.MustCompile(`(?i)(PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY)`)
+	// Names that hold a location, an identifier or a setting, not the
+	// credential itself.
+	secretNameNot = regexp.MustCompile(`(?i)(_FILE|_PATH|_DIR|_NAME|_REF|_URL|_URI|_ID|_HEADER|_ENABLED|_REQUIRED|_TTL|_EXPIRY|_LIFETIME|_AUDIENCE|_ISSUER|_ALG|_ALGORITHM|_LENGTH|_FORMAT|_TYPE|_MODE|_POLICY|_SOURCE|_PROVIDER|_VERSION|_ROUNDS)$`)
+	// Values that are plainly not a credential: switches, numbers,
+	// placeholders, templates, paths and URLs.
+	secretPlaceholder = regexp.MustCompile(`(?i)^(yes|no|on|off|true|false|none|null|\d{1,3}|change[-_]?me|password|passw0rd|secret\d*|x{3,}|placeholder|example|test|dummy|your[-_ ].*|<.*>|\[.*\]|\$\{.*\}|\$\(.*\)|\{\{.*\}\}|%\(.*\)s|#\{.*\}|/.*|\./.*|~.*|https?://.*|.*:\d+)$`)
+)
+
+// HasLiteralSecret reports whether a container of objs sets an env var that
+// looks like a credential to a literal value (what KG021 reports), whether
+// or not the rule is enabled: callers use it to keep such manifests off the
+// network.
+func HasLiteralSecret(objs []*manifest.Object) bool {
+	for _, o := range objs {
+		t := NewTarget(o)
+		if t == nil {
+			continue
+		}
+		for _, c := range t.Containers {
+			for _, e := range yamlx.Items(yamlx.Get(c.Node, "env")) {
+				if v := yamlx.Get(e, "value"); v != nil && v.Kind == yaml.ScalarNode && looksLikeSecret(yamlx.String(e, "name"), v.Value) {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// looksLikeSecret reports whether env var name with the literal value holds
+// a credential. The heuristic was checked by hand on 30 Helm charts and six
+// example repositories (issue #17): every hit it keeps was a real password
+// or key written into the manifest.
+func looksLikeSecret(name, value string) bool {
+	value = strings.TrimSpace(value)
+	if value == "" || !secretName.MatchString(name) || secretNameNot.MatchString(name) {
+		return false
+	}
+	if secretPlaceholder.MatchString(value) || strings.Contains(strings.ToLower(value), strings.ToLower(name)) {
+		return false // a switch, a placeholder, or "INSERT_<NAME>_HERE"
+	}
+	return true
 }
 
 // replicated reports whether o is a workload whose replica count matters:

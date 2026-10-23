@@ -21,7 +21,7 @@ Most Kubernetes linters read a YAML file and print an error. `k8s-guardian` also
 flowchart LR
     subgraph repo["Your repository"]
         M["Manifests · Helm charts<br/>Kustomize overlays"]
-        R["Rules<br/>20 built-in + custom"]
+        R["Rules<br/>21 built-in + custom"]
     end
     subgraph ci["Before merge: CLI, pre-commit, GitHub Action"]
         C["check<br/>findings · safe --fix · baseline"]
@@ -44,7 +44,7 @@ flowchart LR
 
 | Feature | Command | Docs |
 |---|---|---|
-| **20 built-in rules**: requests/limits, non-root, privilege escalation, capabilities, probes, `:latest`, host namespaces and ports, seccomp, Service wiring, PodDisruptionBudgets, removed APIs, RBAC wildcards | `check -f` | [check](docs/check.md) |
+| **21 built-in rules**: requests/limits, non-root, privilege escalation, capabilities, probes, `:latest`, host namespaces and ports, seccomp, literal secrets in env, Service wiring, PodDisruptionBudgets, removed APIs, RBAC wildcards | `check -f` | [check](docs/check.md) |
 | **Safe auto-fix** that keeps comments and leaves unchanged YAML byte for byte; riskier fixes opt-in | `check --fix [--unsafe-fixes]` | [check](docs/check.md#fixes) |
 | **Helm, Kustomize, Argo Rollouts**: render charts with your own `--values` | `check -f chart --values prod.yaml` | [check](docs/check.md#inputs) |
 | **Config file and baseline**: adopt it in an existing repo and fail only on new findings | `.k8s-guardian.yaml`, `--baseline` | [configuration](docs/configuration.md) |

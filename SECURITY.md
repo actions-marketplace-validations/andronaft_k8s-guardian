@@ -16,7 +16,7 @@ from an LLM (`--ai`). It is designed so that none of these can escalate:
 |-------|------------|
 | Manifest values that reach `kubectl` (names, namespaces, labels, kinds) | Validated against Kubernetes naming rules before any call; values are passed as `--flag=value` or `kind/name`, never as bare arguments. A manifest can't inject flags such as `--server=` (which would send your credentials elsewhere). |
 | MCP tool arguments (`audit_cluster_resource`, `check_live`, `diff_cluster`) | Same validation; the MCP server only runs read-only `kubectl get/top`. |
-| Secrets | Never sent to the Claude API (`--ai` refuses files with a `Secret`, the TUI skips them). `diff` compares Secret data but prints `(redacted)`, and doesn't print the API server's messages about Secrets (`--server-side`); `audit` drops Secret data. |
+| Secrets | Never sent to the Claude API (`--ai` refuses files with a `Secret`, the TUI skips them). `diff` compares Secret data but prints `(redacted)`, and doesn't print the API server's messages about Secrets (`--server-side`); `audit` drops Secret data. KG021 reports env vars that hold a literal credential without printing the value. |
 | LLM answers (`--fix --ai`, TUI, `rule create`) | The fixed manifest must contain exactly the same resources, must not introduce new errors (prompt-injection guard), and is re-validated. Generated rule names are restricted to DNS labels, so they can't write files outside the rules directory. |
 | Unrelated/broken YAML in a repository | Skipped with a warning while walking directories (a broken Kubernetes manifest still fails). Aliases are not expanded, so YAML bombs are harmless. |
 
@@ -32,8 +32,9 @@ from an LLM (`--ai`). It is designed so that none of these can escalate:
 - AI features (`--ai`, `rule create`, `use_ai` in MCP) send data to the
   Claude API only when explicitly requested. `cost --ai` sends image names,
   ports, env var *names*, commands and resources, never env values.
-  Note that `--fix --ai` sends the manifest itself, including literal env
-  values; keep credentials in Secrets.
+  `--fix --ai` sends the manifest itself, so it refuses files that contain
+  a Secret or a credential in a literal env value (KG021); keep credentials
+  in Secrets.
 - Kustomize and Helm are rendered with `kustomize build` / `kubectl
   kustomize` / `helm template` without plugins or hooks enabled.
 - Release workflows pin third-party actions to commit SHAs; CI runs

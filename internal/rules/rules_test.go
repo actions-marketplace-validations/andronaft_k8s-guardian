@@ -585,3 +585,44 @@ spec:
 		t.Errorf("DaemonSet: %v", got)
 	}
 }
+
+func TestLiteralSecret(t *testing.T) {
+	const pod = `apiVersion: v1
+kind: Pod
+metadata: {name: db}
+spec:
+  containers:
+    - name: db
+      image: postgres:16
+      env:
+        - {name: POSTGRES_PASSWORD, value: hunter2}
+        - {name: API_KEY, value: AIzaSyD3m0}
+        - {name: POSTGRES_PASSWORD_FILE, value: /run/secrets/pw}
+        - {name: ALLOW_EMPTY_PASSWORD, value: "no"}
+        - {name: TOKEN_TTL, value: "3600"}
+        - {name: SECRET_NAME, value: db-credentials}
+        - {name: GOOGLE_API_KEY, value: GOOGLE_API_KEY_VAL}
+        - {name: ETCD_DISCOVERY_TOKEN, value: INSERT_ETCD_DISCOVERY_TOKEN}
+        - {name: VAULT_TOKEN, value: "${VAULT_TOKEN}"}
+        - {name: MYSQL_ROOT_PASSWORD, value: ""}
+        - {name: JWT_SECRET, value: changeme}
+        - {name: ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: admin, key: password}}}
+        - {name: PORT, value: "5432"}
+    - name: sidecar
+      image: proxy:1
+      env: [{name: PROXY_TOKEN, value: tok_live_4eC39HqLyjWDarjtT1zdp7dc}]
+`
+	got := messages(validateDoc(t, pod), "KG021")
+	want := []string{
+		"env POSTGRES_PASSWORD, API_KEY holds a literal credential: use valueFrom.secretKeyRef or a mounted file",
+		"env PROXY_TOKEN holds a literal credential: use valueFrom.secretKeyRef or a mounted file",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("KG021 = %q, want %q", got, want)
+	}
+	for _, m := range got {
+		if strings.Contains(m, "hunter2") || strings.Contains(m, "tok_live") {
+			t.Errorf("the finding prints the value: %s", m)
+		}
+	}
+}

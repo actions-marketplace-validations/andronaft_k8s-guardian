@@ -3,6 +3,7 @@ kind: Kustomization
 namespace: prod
 resources:
   - ../../base
+  - pdb.yaml
 patches:
   - target: {kind: Deployment, name: web}
     patch: |-

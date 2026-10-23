@@ -1,0 +1,9 @@
+# Production runs 3 replicas: let a node drain or upgrade evict one at a time.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: web
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels: {app: web}

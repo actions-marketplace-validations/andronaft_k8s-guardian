@@ -67,6 +67,7 @@ To review each fix before it is applied, see [interactive review](interactive.md
 | KG017 | `removed-api-version`: e.g. `extensions/v1beta1`, `batch/v1beta1` CronJob, `autoscaling/v2beta2` | error | AI |
 | KG018 | `rbac-wildcard`: Roles and ClusterRoles granting `"*"` verbs or resources | warning | AI |
 | KG019 | `no-host-port`: `ports[].hostPort` binds a node port (one such pod per node, bypasses NetworkPolicies on many CNIs; forbidden by the Pod Security baseline level) | warning | AI |
+| KG021 | `literal-secret`: an env var that looks like a credential (`PASSWORD`, `SECRET`, `TOKEN`, `API_KEY`, `PRIVATE_KEY`) has a literal `value`; names that hold a path, a name or a setting (`_FILE`, `_NAME`, `_ENABLED`, …) and placeholder values are skipped, and the value is never printed | warning | AI |
 | KG020 | `pod-disruption-budget`: a workload with 2+ replicas (or an HPA with `minReplicas` ≥ 2) has no PodDisruptionBudget in the manifest set selecting its pods, or one that allows no disruption (`maxUnavailable: 0`, `minAvailable` ≥ replicas) | info | AI |
 
 auto: `--fix`. auto*: `--fix --unsafe-fixes` (review the result). AI: only `--fix --ai` or a manual edit.

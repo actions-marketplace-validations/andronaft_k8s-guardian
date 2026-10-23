@@ -23,6 +23,7 @@ All on `main`:
 | | `--live`: LV003 warns when no node has the pod's requests free |
 | [#13](https://github.com/andronaft/k8s-guardian/issues/13) | KG019: no host ports |
 | [#14](https://github.com/andronaft/k8s-guardian/issues/14) | KG020: PodDisruptionBudget for workloads with 2+ replicas |
+| [#17](https://github.com/andronaft/k8s-guardian/issues/17) | KG021: literal credentials in env values (the prototype was precise on real manifests) |
 
 ## Next: [v0.9.0](https://github.com/andronaft/k8s-guardian/milestone/4), coverage
 
@@ -39,7 +40,6 @@ Check what matters most in the Kubernetes security model, and more of the worklo
 
 | Issue | |
 |-------|---|
-| [#17](https://github.com/andronaft/k8s-guardian/issues/17) | Flag literal secrets in env values, only if a prototype proves precise on real manifests |
 | [#18](https://github.com/andronaft/k8s-guardian/issues/18) | Recommend HPA targets from Prometheus history (`cost`, experimental) |
 
 ## How to help
