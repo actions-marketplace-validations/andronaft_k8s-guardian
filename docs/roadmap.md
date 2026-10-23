@@ -21,6 +21,8 @@ All on `main`:
 | | `k8s-guardian init`: config, baseline and GitHub workflow in one step |
 | | GitHub Action `new-only`: a pull request fails only on problems it adds |
 | | `--live`: LV003 warns when no node has the pod's requests free |
+| [#13](https://github.com/andronaft/k8s-guardian/issues/13) | KG019: no host ports |
+| [#14](https://github.com/andronaft/k8s-guardian/issues/14) | KG020: PodDisruptionBudget for workloads with 2+ replicas |
 
 ## Next: [v0.9.0](https://github.com/andronaft/k8s-guardian/milestone/4), coverage
 
@@ -29,8 +31,6 @@ Check what matters most in the Kubernetes security model, and more of the worklo
 | Issue | |
 |-------|---|
 | [#12](https://github.com/andronaft/k8s-guardian/issues/12) | Pod Security Standards profiles: `--profile baseline\|restricted` |
-| [#13](https://github.com/andronaft/k8s-guardian/issues/13) | New rule: no host ports *(good first issue)* |
-| [#14](https://github.com/andronaft/k8s-guardian/issues/14) | New rule: PodDisruptionBudget for workloads with 2+ replicas |
 | [#15](https://github.com/andronaft/k8s-guardian/issues/15) | Configurable workload kinds for CRDs (Knative, KubeVirt, …) |
 | [#16](https://github.com/andronaft/k8s-guardian/issues/16) | Export Argo Rollouts and probe rules to VAP and Kyverno |
 | [#5](https://github.com/andronaft/k8s-guardian/issues/5) | GitHub Action: inputs for config, baseline and Helm values *(good first issue)* |

@@ -44,3 +44,15 @@ spec:
             httpGet:
               path: /ready
               port: http
+---
+# Lets a node drain or cluster upgrade evict one replica at a time.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: api
+  namespace: shop
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: api

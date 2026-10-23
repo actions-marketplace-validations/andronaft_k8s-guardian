@@ -281,8 +281,7 @@ var All = []*Rule{
 		ID: "KG015", Name: "high-availability", Severity: Info,
 		Description: "Deployments and StatefulSets should run at least 2 replicas (or an HPA with minReplicas >= 2) for availability.",
 		Resource: func(o *manifest.Object, set *Set) []string {
-			k := o.Kind()
-			if k != "Deployment" && k != "StatefulSet" && k != "Rollout" {
+			if !replicated(o) {
 				return nil
 			}
 			// An HorizontalPodAutoscaler decides the replica count.
@@ -306,6 +305,34 @@ var All = []*Rule{
 			return nil
 		},
 	},
+	{
+		ID: "KG019", Name: "no-host-port", Severity: Warning,
+		Description: "Containers should not bind host ports: only one such pod fits a node, and NetworkPolicies don't cover the port on many CNIs (the Pod Security baseline level forbids them).",
+		Container: func(_ *Target, c *Container) string {
+			var ports []string
+			for _, p := range yamlx.Items(yamlx.Get(c.Node, "ports")) {
+				if hp := yamlx.String(p, "hostPort"); hp != "" && hp != "0" {
+					ports = append(ports, hp)
+				}
+			}
+			if len(ports) == 0 {
+				return ""
+			}
+			return "binds hostPort " + strings.Join(ports, ", ") + " on the node"
+		},
+	},
+}
+
+// replicated reports whether o is a workload whose replica count matters:
+// a Deployment, a StatefulSet or an Argo Rollout.
+func replicated(o *manifest.Object) bool {
+	switch o.Kind() {
+	case "Deployment", "StatefulSet":
+		return true
+	case "Rollout":
+		return strings.HasPrefix(o.APIVersion(), "argoproj.io/")
+	}
+	return false
 }
 
 func isPrivileged(c *Container) bool {

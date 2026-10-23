@@ -237,7 +237,113 @@ func init() {
 				return []string{"grants " + strings.Join(parts, " and ")}
 			},
 		},
+		&Rule{
+			ID: "KG020", Name: "pod-disruption-budget", Severity: Info,
+			Description: "Workloads with 2 or more replicas should have a PodDisruptionBudget, so a node drain or cluster upgrade doesn't evict every replica at once; the budget must leave room for a disruption.",
+			Resource: func(o *manifest.Object, set *Set) []string {
+				if !replicated(o) {
+					return nil
+				}
+				n := desiredReplicas(o, set)
+				if n < 2 {
+					return nil
+				}
+				labels := PodTemplateLabels(o)
+				var out []string
+				found := false
+				for _, pdb := range set.pdbsIn(o.Namespace()) {
+					if !pdb.selects(labels) {
+						continue
+					}
+					found = true
+					if why := pdb.blocks(n); why != "" {
+						out = append(out, fmt.Sprintf("PodDisruptionBudget %s allows no voluntary disruption (%s): node drains and upgrades hang on these pods", pdb.obj.Name(), why))
+					}
+				}
+				if !found {
+					out = append(out, fmt.Sprintf("runs %d replicas but no PodDisruptionBudget in this manifest set selects its pods: a node drain can evict all of them at once", n))
+				}
+				return out
+			},
+		},
 	)
+}
+
+// desiredReplicas is the replica count a workload runs: the HPA's
+// minReplicas when one scales it, else spec.replicas (both default to 1).
+func desiredReplicas(o *manifest.Object, set *Set) int {
+	if hpa := set.HPAFor(o); hpa != nil {
+		if n, err := strconv.Atoi(yamlx.String(hpa.Root, "spec", "minReplicas")); err == nil {
+			return n
+		}
+		return 1
+	}
+	if n, err := strconv.Atoi(yamlx.String(o.Root, "spec", "replicas")); err == nil {
+		return n
+	}
+	return 1
+}
+
+// pdb is a PodDisruptionBudget of the manifest set.
+type pdb struct {
+	obj      *manifest.Object
+	selector *yaml.Node // spec.selector; nil selects nothing, {} everything
+}
+
+// selects reports whether the budget's selector matches the pod labels.
+func (p pdb) selects(labels *yaml.Node) bool {
+	if p.selector == nil || p.selector.Kind != yaml.MappingNode {
+		return false
+	}
+	if ml := yamlx.Get(p.selector, "matchLabels"); ml != nil && !labelsMatch(ml, labels) {
+		return false
+	}
+	for _, e := range yamlx.Items(yamlx.Get(p.selector, "matchExpressions")) {
+		if !requirementMatches(e, labels) {
+			return false
+		}
+	}
+	return true
+}
+
+// requirementMatches evaluates one LabelSelectorRequirement. An operator it
+// doesn't know counts as matching, so a budget is never overlooked.
+func requirementMatches(e, labels *yaml.Node) bool {
+	key := yamlx.String(e, "key")
+	has := labels != nil && yamlx.Get(labels, key) != nil
+	in := false
+	for _, v := range yamlx.Items(yamlx.Get(e, "values")) {
+		if has && v.Value == yamlx.String(labels, key) {
+			in = true
+		}
+	}
+	switch yamlx.String(e, "operator") {
+	case "In":
+		return in
+	case "NotIn":
+		return !in
+	case "Exists":
+		return has
+	case "DoesNotExist":
+		return !has
+	}
+	return true
+}
+
+// blocks explains why a budget leaves no room for a disruption of a
+// workload with n replicas, or returns "".
+func (p pdb) blocks(n int) string {
+	if v := yamlx.String(p.obj.Root, "spec", "maxUnavailable"); v == "0" || v == "0%" {
+		return "maxUnavailable " + v
+	}
+	v := yamlx.String(p.obj.Root, "spec", "minAvailable")
+	if v == "100%" {
+		return "minAvailable " + v
+	}
+	if min, err := strconv.Atoi(v); err == nil && min >= n {
+		return fmt.Sprintf("minAvailable %d with %d replicas", min, n)
+	}
+	return ""
 }
 
 func refs(ts []*Target) string {
