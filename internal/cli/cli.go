@@ -310,7 +310,36 @@ func (f *flags) options() (rules.Options, error) {
 	if err := f.severityOverrides(c, opts); err != nil {
 		return opts, err
 	}
+	if err := f.checkSkip(c, opts); err != nil {
+		return opts, err
+	}
 	return opts, nil
+}
+
+// checkSkip rejects a skip list that names no rule, so a typo doesn't leave
+// the rule running (or hide why a finding keeps appearing).
+func (f *flags) checkSkip(c *config.Config, opts rules.Options) error {
+	for _, s := range append(strings.Split(f.skip, ","), c.Skip...) {
+		s = strings.TrimSpace(s)
+		if s == "" || knownRules(opts)[strings.ToLower(s)] {
+			continue
+		}
+		where := "--skip"
+		if c.Path != "" && !strings.Contains(f.skip, s) {
+			where = "config " + c.Path + ": skip"
+		}
+		return fmt.Errorf("%s: unknown rule %q (the rules command lists them)", where, s)
+	}
+	return nil
+}
+
+// knownRules indexes every rule ID and name, lower-cased.
+func knownRules(opts rules.Options) map[string]bool {
+	known := map[string]bool{}
+	for _, r := range append(append(opts.Rules(), live.Rules...), diff.Rules...) {
+		known[strings.ToLower(r.ID)], known[strings.ToLower(r.Name)] = true, true
+	}
+	return known
 }
 
 // severityOverrides validates the config's severity map against every known
@@ -319,10 +348,7 @@ func (f *flags) severityOverrides(c *config.Config, opts rules.Options) error {
 	if len(c.Severity) == 0 {
 		return nil
 	}
-	known := map[string]bool{}
-	for _, r := range append(append(opts.Rules(), live.Rules...), diff.Rules...) {
-		known[strings.ToLower(r.ID)], known[strings.ToLower(r.Name)] = true, true
-	}
+	known := knownRules(opts)
 	f.severity = map[string]rules.Severity{}
 	for k, v := range c.Severity {
 		if !known[strings.ToLower(k)] {
@@ -535,7 +561,8 @@ Shorthands (kubectl plugin style):
 Common flags: --format text|json|sarif|github|markdown  --fail-on error|warning|info  --skip KG006,KG015  --rules <path>  --config <file>
 Exit codes: 0 ok, 1 findings at/above --fail-on, 2 usage or runtime error.
 Environment: ANTHROPIC_API_KEY (for --ai), K8S_GUARDIAN_MODEL (default %[3]s),
-             K8S_GUARDIAN_RULES, K8S_GUARDIAN_CPU_HOUR / K8S_GUARDIAN_GIB_HOUR (cost).
+             K8S_GUARDIAN_RULES, K8S_GUARDIAN_CPU_HOUR / K8S_GUARDIAN_GIB_HOUR (cost),
+             K8S_GUARDIAN_KUBECTL_TIMEOUT (per kubectl call, default 30s).
 Run "%[1]s <command> -h" for command flags.
 `, a.Name, a.Version, ai.DefaultModel)
 }

@@ -94,3 +94,11 @@ func TestParseNodeRequests(t *testing.T) {
 		t.Errorf("got %+v, want %+v", got, want)
 	}
 }
+
+func TestKubectlTimeout(t *testing.T) {
+	for env, want := range map[string]string{"": "30s", "2m": "2m", "bogus": "30s", "0s": "30s", "-1s": "30s"} {
+		if got := kubectlTimeout(env); got != want {
+			t.Errorf("kubectlTimeout(%q) = %q, want %q", env, got, want)
+		}
+	}
+}
