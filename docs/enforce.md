@@ -31,7 +31,7 @@ CI and the cluster make **the same decision**. An e2e suite starts a real kube-a
 
 ## What can be exported
 
-* **Built-in rules:** KG001–KG007 and KG010–KG012.
+* **Built-in rules:** KG001–KG007, KG010–KG014 and KG019. The others need the whole manifest set or the cluster (Service wiring, HPAs, PodDisruptionBudgets, RBAC), or are heuristics (probes, literal secrets, removed APIs are checked by the API server itself).
 * **Custom rules** are exported too, including the paths from `rules:` in the [config file](configuration.md). Resource-scoped custom rules need `match.kinds` to be exported.
 * **Rules that need other resources or the cluster stay in `check`.** These include Service/workload wiring, HPA-aware replica counts, RBAC and quotas.
 * **Argo Rollouts are not part of the exported policies.**

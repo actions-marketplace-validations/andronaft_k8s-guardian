@@ -24,6 +24,8 @@ All on `main`:
 | [#13](https://github.com/andronaft/k8s-guardian/issues/13) | KG019: no host ports |
 | [#14](https://github.com/andronaft/k8s-guardian/issues/14) | KG020: PodDisruptionBudget for workloads with 2+ replicas |
 | [#17](https://github.com/andronaft/k8s-guardian/issues/17) | KG021: literal credentials in env values (the prototype was precise on real manifests) |
+| | KG013, KG014 and KG019 exported as ValidatingAdmissionPolicies and Kyverno policies, verified against a real API server and Kyverno |
+| | Every `kubectl` call has a timeout; unknown rules in `skip` are an error; Helm charts render their `crds/` |
 
 ## Next: [v0.9.0](https://github.com/andronaft/k8s-guardian/milestone/4), coverage
 

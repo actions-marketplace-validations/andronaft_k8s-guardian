@@ -21,7 +21,14 @@ import (
 // test groups don't interfere with each other.
 func applyPolicies(t *testing.T, builtin []string, docs []custom.Document, ns string) {
 	t.Helper()
-	res, err := export.VAP(builtin, docs, export.Options{})
+	applyPoliciesWith(t, builtin, docs, ns, export.Options{})
+}
+
+// applyPoliciesWith is applyPolicies with export options (e.g. Action Deny,
+// which makes warning and info rules deny too).
+func applyPoliciesWith(t *testing.T, builtin []string, docs []custom.Document, ns string, opts export.Options) {
+	t.Helper()
+	res, err := export.VAP(builtin, docs, opts)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -186,6 +193,53 @@ func TestExportedBuiltinPoliciesMatchEngine(t *testing.T) {
 	for _, kind := range []string{"Pod", "Deployment", "CronJob"} {
 		for _, c := range cases {
 			compare(t, kind+"/"+c.name, workload(kind, ns, c.image, c.res, c.sc, c.extra), opts, idSet)
+		}
+	}
+}
+
+// Warning and info rules export as Warn and Audit, which a dry run doesn't
+// deny. With --action Deny they must deny exactly what the engine reports.
+func TestExportedBuiltinPoliciesMatchEngineWithDeny(t *testing.T) {
+	ns := "e2e-builtin-deny"
+	namespace(t, ns)
+	ids := export.BuiltinIDs()
+	applyPoliciesWith(t, ids, nil, ns, export.Options{Action: "Deny"})
+	idSet := map[string]bool{}
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	okRes := "{requests: {cpu: 10m, memory: 8Mi}, limits: {memory: 8Mi}}"
+	okSC := "{runAsNonRoot: true, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}, seccompProfile: {type: RuntimeDefault}}"
+	noSeccomp := "{runAsNonRoot: true, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}}"
+	img := "registry.example.com/app:1.0"
+	noMount := "      automountServiceAccountToken: false\n"
+	cases := []struct{ name, image, res, sc, extra string }{
+		{"compliant", img, okRes, okSC, noMount},
+		{"seccomp at pod level only", img, okRes, noSeccomp, noMount + "      securityContext: {seccompProfile: {type: Localhost, localhostProfile: p.json}}\n"},
+		{"no seccomp", img, okRes, noSeccomp, noMount},
+		{"seccomp Unconfined", img, okRes, "{runAsNonRoot: true, allowPrivilegeEscalation: false, readOnlyRootFilesystem: true, capabilities: {drop: [ALL]}, seccompProfile: {type: Unconfined}}", noMount},
+		{"token mounted by default", img, okRes, okSC, ""},
+		{"token mounted explicitly", img, okRes, okSC, "      automountServiceAccountToken: true\n"},
+		{"host port", img, okRes, okSC, "          ports: [{containerPort: 80, hostPort: 8080}]\n" + noMount},
+		{"host port 0", img, okRes, okSC, "          ports: [{containerPort: 80, hostPort: 0}]\n" + noMount},
+		{"init container with a host port", img, okRes, okSC,
+			noMount + "      initContainers:\n        - name: init\n          image: " + img + "\n          resources: " + okRes + "\n          securityContext: " + okSC + "\n          ports: [{containerPort: 53, hostPort: 53}]\n"},
+	}
+	for _, kind := range []string{"Pod", "Deployment", "CronJob"} {
+		for _, c := range cases {
+			doc := workload(kind, ns, c.image, c.res, c.sc, c.extra)
+			want := engineAll(t, doc, rules.NewOptions(""), idSet)
+			got := dryRun(t, doc)
+			switch {
+			case len(want) == 0 && got.denied:
+				t.Errorf("%s/%s: engine allows it but the cluster denied it (%s):\n%s", kind, c.name, got.by, got.out)
+			case len(want) > 0 && !got.denied:
+				t.Errorf("%s/%s: engine reports %v but the cluster allowed it:\n%s", kind, c.name, want, doc)
+			case got.denied && !contains(want, got.by):
+				t.Errorf("%s/%s: cluster denied with %s, engine reports %v", kind, c.name, got.by, want)
+			default:
+				t.Logf("✔ %s/%s: engine %v, cluster denied=%v %s", kind, c.name, want, got.denied, got.by)
+			}
 		}
 	}
 }
