@@ -1,6 +1,9 @@
 package manifest
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -137,7 +140,7 @@ func TestEncodeFallsBackForUnusualStreams(t *testing.T) {
 
 func TestHelmArgsCannotInjectFlags(t *testing.T) {
 	got := strings.Join(HelmArgs("chart", LoadOptions{HelmValues: []string{"--post-renderer=/bin/sh"}, HelmSet: []string{"a=b"}}), " ")
-	if got != "template k8s-guardian chart --values=--post-renderer=/bin/sh --set=a=b" {
+	if got != "template k8s-guardian chart --include-crds --values=--post-renderer=/bin/sh --set=a=b" {
 		t.Errorf("unexpected helm args: %s", got)
 	}
 }
@@ -156,7 +159,7 @@ func TestNormalizeKubeVersion(t *testing.T) {
 		}
 	}
 	got := strings.Join(HelmArgs("chart", LoadOptions{KubeVersion: "v1.33.0"}), " ")
-	if got != "template k8s-guardian chart --kube-version=v1.33.0" {
+	if got != "template k8s-guardian chart --include-crds --kube-version=v1.33.0" {
 		t.Errorf("unexpected helm args: %s", got)
 	}
 }
@@ -294,5 +297,37 @@ func TestCompactLists(t *testing.T) {
 		if got := compactLists(&d); got != want {
 			t.Errorf("compactLists(%q) = %v, want %v", src, got, want)
 		}
+	}
+}
+
+// A chart's crds/ directory is part of what helm install creates, so it is
+// part of what gets checked (and LV001 sees the CRDs a chart ships).
+func TestHelmIncludesChartCRDs(t *testing.T) {
+	if _, err := exec.LookPath("helm"); err != nil {
+		t.Skip("helm not installed")
+	}
+	dir := t.TempDir()
+	if err := os.CopyFS(dir, os.DirFS("../cli/testdata/chart")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "crds"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	crd := "apiVersion: apiextensions.k8s.io/v1\nkind: CustomResourceDefinition\nmetadata: {name: widgets.example.com}\nspec:\n  group: example.com\n  names: {kind: Widget, plural: widgets}\n  scope: Namespaced\n  versions: [{name: v1, served: true, storage: true, schema: {openAPIV3Schema: {type: object}}}]\n"
+	if err := os.WriteFile(filepath.Join(dir, "crds", "widget.yaml"), []byte(crd), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	files, _, err := LoadWith(dir, LoadOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var kinds []string
+	for _, f := range files {
+		for _, o := range f.Objects {
+			kinds = append(kinds, o.Kind())
+		}
+	}
+	if strings.Join(kinds, ",") != "CustomResourceDefinition,Deployment" {
+		t.Errorf("rendered objects: %v", kinds)
 	}
 }

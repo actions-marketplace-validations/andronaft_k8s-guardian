@@ -490,7 +490,7 @@ func NormalizeKubeVersion(v string) (string, error) {
 // HelmArgs returns the `helm template` arguments for a chart. Values are
 // passed as --flag=value so none of them can become another helm flag.
 func HelmArgs(dir string, o LoadOptions) []string {
-	args := []string{"template", "k8s-guardian", dir}
+	args := []string{"template", "k8s-guardian", dir, "--include-crds"}
 	for _, v := range o.HelmValues {
 		args = append(args, "--values="+v)
 	}
