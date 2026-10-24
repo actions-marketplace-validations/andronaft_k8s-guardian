@@ -518,3 +518,22 @@ func TestUnknownCommandSuggestion(t *testing.T) {
 		}
 	}
 }
+
+// A skip list that names no rule is a mistake, not a no-op.
+func TestSkipUnknownRule(t *testing.T) {
+	code, _, stderr := run(t, "check", "-f", secure, "--skip", "KG006,KG999")
+	if code != ExitError || !strings.Contains(stderr, `--skip: unknown rule "KG999"`) {
+		t.Errorf("exit %d, stderr %q", code, stderr)
+	}
+	if code, _, stderr := run(t, "check", "-f", secure, "--skip", "kg006, liveness-probe,LV003,DF001"); code != 0 {
+		t.Errorf("known IDs and names rejected: exit %d, %s", code, stderr)
+	}
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "cfg.yaml")
+	if err := os.WriteFile(cfg, []byte("skip: [KG015, readines-probe]\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := run(t, "check", "-f", secure, "--config", cfg); code != ExitError || !strings.Contains(stderr, `skip: unknown rule "readines-probe"`) {
+		t.Errorf("config: exit %d, stderr %q", code, stderr)
+	}
+}
