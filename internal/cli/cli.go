@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -475,14 +476,23 @@ func exitCode(fs []rules.Finding, failOn rules.Severity) int {
 
 func (a *App) listRules(args []string) error {
 	var f flags
-	fs := a.flagSet("rules", "rules [--rules <path>]")
+	fs := a.flagSet("rules", "rules [--rules <path>] [--format text|json]")
 	f.ruleFlags(fs)
+	fs.StringVar(&f.format, "format", "text", "output format: text, json")
+	fs.StringVar(&f.format, "o", "text", "shorthand for --format")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
 	opts, err := f.options()
 	if err != nil {
 		return err
+	}
+	switch f.format {
+	case "json":
+		return a.rulesJSON(opts)
+	case "text":
+	default:
+		return fmt.Errorf("unknown format %q (text, json)", f.format)
 	}
 	section := func(title string, rs []*rules.Rule, fixCol bool) {
 		if len(rs) == 0 {
@@ -511,6 +521,58 @@ func (a *App) listRules(args []string) error {
 	section("Change rules (diff):", diff.Rules, false)
 	fmt.Fprintf(a.Stdout, "\nSkip rules per resource with the annotation %s: \"KG006,liveness-probe\"\n", rules.IgnoreAnnotation)
 	return nil
+}
+
+// ruleInfo is one rule in `rules --format json`.
+type ruleInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Severity    string `json:"severity"`
+	Description string `json:"description"`
+	// Scope is container, pod or resource for check rules, live or diff
+	// for the others.
+	Scope string `json:"scope"`
+	// Fix is auto, unsafe (needs --fix --unsafe-fixes), ai or none.
+	Fix    string `json:"fix"`
+	Custom bool   `json:"custom,omitempty"`
+}
+
+// rulesJSON prints every rule as JSON, for tooling and docs generation.
+func (a *App) rulesJSON(opts rules.Options) error {
+	var out []ruleInfo
+	add := func(rs []*rules.Rule, scope, fix string) {
+		for _, r := range rs {
+			info := ruleInfo{ID: r.ID, Name: r.Name, Severity: r.Severity.String(), Description: r.Description, Scope: scope, Fix: fix, Custom: r.Custom}
+			if scope == "" {
+				switch {
+				case r.Container != nil:
+					info.Scope = "container"
+				case r.Pod != nil:
+					info.Scope = "pod"
+				default:
+					info.Scope = "resource"
+				}
+			}
+			if fix == "" {
+				switch {
+				case r.Fix != nil && r.Unsafe:
+					info.Fix = "unsafe"
+				case r.Fix != nil:
+					info.Fix = "auto"
+				default:
+					info.Fix = "ai"
+				}
+			}
+			out = append(out, info)
+		}
+	}
+	add(rules.All, "", "")
+	add(opts.Custom, "", "")
+	add(live.Rules, "live", "none")
+	add(diff.Rules, "diff", "none")
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func (a *App) usage() {

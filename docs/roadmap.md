@@ -26,6 +26,7 @@ All on `main`:
 | [#17](https://github.com/andronaft/k8s-guardian/issues/17) | KG021: literal credentials in env values (the prototype was precise on real manifests) |
 | | KG013, KG014 and KG019 exported as ValidatingAdmissionPolicies and Kyverno policies, verified against a real API server and Kyverno |
 | | Every `kubectl` call has a timeout; unknown rules in `skip` are an error; Helm charts render their `crds/` |
+| [#29](https://github.com/andronaft/k8s-guardian/issues/29) | `rules --format json` for tooling |
 
 ## Next: [v0.9.0](https://github.com/andronaft/k8s-guardian/milestone/4), coverage
 
@@ -40,7 +41,6 @@ Check what matters most in the Kubernetes security model, and more of the worklo
 | [#30](https://github.com/andronaft/k8s-guardian/issues/30) | GitHub Action: use the release binary instead of building from source |
 | [#28](https://github.com/andronaft/k8s-guardian/issues/28) | LV003: required pod anti-affinity and topology spread constraints |
 | [#27](https://github.com/andronaft/k8s-guardian/issues/27) | Kustomize: render `helmCharts` entries *(good first issue)* |
-| [#29](https://github.com/andronaft/k8s-guardian/issues/29) | `rules --format json` for tooling and docs generation *(good first issue)* |
 
 ## [Later](https://github.com/andronaft/k8s-guardian/milestone/3): ideas that need evidence first
 

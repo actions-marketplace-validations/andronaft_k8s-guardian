@@ -537,3 +537,39 @@ func TestSkipUnknownRule(t *testing.T) {
 		t.Errorf("config: exit %d, stderr %q", code, stderr)
 	}
 }
+
+func TestRulesJSON(t *testing.T) {
+	code, out, stderr := run(t, "rules", "--format", "json", "--rules", "../../examples/rules")
+	if code != 0 {
+		t.Fatalf("exit %d: %s", code, stderr)
+	}
+	var list []struct {
+		ID, Name, Severity, Description, Scope, Fix string
+		Custom                                      bool
+	}
+	if err := json.Unmarshal([]byte(out), &list); err != nil {
+		t.Fatalf("not JSON: %v\n%s", err, out)
+	}
+	got := map[string]string{}
+	custom := 0
+	for _, r := range list {
+		got[r.ID] = r.Scope + "/" + r.Fix + "/" + r.Severity
+		if r.Custom {
+			custom++
+		}
+		if r.Name == "" || r.Description == "" {
+			t.Errorf("%s: empty name or description", r.ID)
+		}
+	}
+	for id, want := range map[string]string{"KG001": "container/unsafe/error", "KG005": "container/auto/warning", "KG013": "pod/auto/warning", "KG016": "resource/ai/warning", "LV001": "live/none/error", "DF001": "diff/none/error"} {
+		if got[id] != want {
+			t.Errorf("%s = %q, want %q", id, got[id], want)
+		}
+	}
+	if custom == 0 {
+		t.Error("no custom rule from examples/rules")
+	}
+	if code, _, stderr := run(t, "rules", "-o", "xml"); code != ExitError || !strings.Contains(stderr, `unknown format "xml"`) {
+		t.Errorf("unknown format: exit %d, %s", code, stderr)
+	}
+}
