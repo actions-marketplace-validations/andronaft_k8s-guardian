@@ -70,6 +70,24 @@ func TestAIFixNeverSendsSecrets(t *testing.T) {
 	}
 }
 
+// A password written into an env value is a credential too, whatever the
+// rule settings are.
+func TestAIFixNeverSendsLiteralCredentials(t *testing.T) {
+	calls := fakeClaude(t, "")
+	doc := strings.Replace(twoObjects, "containers: [{name: c, image: nginx:1.27}]", "containers: [{name: c, image: nginx:1.27, env: [{name: DB_PASSWORD, value: hunter2}]}]", 1)
+	if doc == twoObjects {
+		t.Fatal("test fixture changed")
+	}
+	f, _ := manifest.Parse([]byte(doc), "app.yaml")
+	_, err := Fix(context.Background(), f, FixOptions{Rules: rules.NewOptions("KG021"), AI: true, AIMinSeverity: rules.Info})
+	if err == nil || !strings.Contains(err.Error(), "literal env value (KG021)") {
+		t.Fatalf("expected refusal, got %v", err)
+	}
+	if *calls != 0 {
+		t.Fatalf("the Claude API was called %d time(s)", *calls)
+	}
+}
+
 func TestAIFixCannotIntroduceNewErrors(t *testing.T) {
 	// A prompt-injected answer that "fixes" the Pod by making it privileged.
 	fakeClaude(t, "apiVersion: v1\nkind: Pod\nmetadata: {name: a}\nspec:\n  hostNetwork: true\n  containers: [{name: c, image: nginx:latest}]\n---\napiVersion: v1\nkind: Service\nmetadata: {name: svc}\nspec: {ports: [{port: 80}]}\n")

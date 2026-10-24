@@ -47,7 +47,11 @@ The action runs in the repository root, so a [`.k8s-guardian.yaml`](configuratio
 | `namespace` | | Namespace for objects without one |
 | `sarif-file` | | Also write SARIF, for `github/codeql-action/upload-sarif` |
 | `cost` | `false` | Add a monthly cost estimate to the job summary |
-| `args` | | Extra arguments for `k8s-guardian check`, e.g. `--values values-prod.yaml` |
+| `config` | `.k8s-guardian.yaml` if present | Config file (`--config`) |
+| `baseline` | the config's `baseline` | Baseline file of known findings (`--baseline`); not used with `new-only` |
+| `values` | | Helm values files for charts in `path`, whitespace separated (`--values`) |
+| `set` | | Helm values for charts in `path`, `key=value` whitespace separated (`--set`) |
+| `args` | | Extra arguments for `k8s-guardian check` |
 | `new-only` | `false` | On pull requests, report only findings the pull request adds (see below) |
 | `base-ref` | the PR's base branch | Branch `new-only` compares with |
 

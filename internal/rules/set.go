@@ -15,6 +15,20 @@ type Set struct {
 
 	workloads map[string][]workload       // namespace -> workloads, in manifest order
 	hpas      map[string]*manifest.Object // namespace, kind, name of the scale target -> first HPA
+	pdbs      map[string][]pdb            // namespace -> PodDisruptionBudgets, in manifest order
+}
+
+// pdbsIn returns the PodDisruptionBudgets in namespace ns.
+func (s *Set) pdbsIn(ns string) []pdb {
+	if s.pdbs == nil {
+		s.pdbs = map[string][]pdb{}
+		for _, o := range s.Objects {
+			if o.Kind() == "PodDisruptionBudget" {
+				s.pdbs[o.Namespace()] = append(s.pdbs[o.Namespace()], pdb{obj: o, selector: yamlx.Path(o.Root, "spec", "selector")})
+			}
+		}
+	}
+	return s.pdbs[ns]
 }
 
 type workload struct {

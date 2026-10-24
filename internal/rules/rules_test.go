@@ -494,3 +494,135 @@ func BenchmarkValidate(b *testing.B) {
 		})
 	}
 }
+
+func TestHostPort(t *testing.T) {
+	const pod = `apiVersion: v1
+kind: Pod
+metadata: {name: agent}
+spec:
+  initContainers:
+    - {name: setup, image: setup:1, ports: [{containerPort: 9100, hostPort: 9100}]}
+  containers:
+    - name: agent
+      image: agent:1
+      ports:
+        - {containerPort: 8080}
+        - {containerPort: 8443, hostPort: 0}
+        - {containerPort: 53, hostPort: 53, protocol: UDP}
+        - {containerPort: 53, hostPort: 1053}
+    - {name: clean, image: clean:1}
+`
+	got := messages(validateDoc(t, pod), "KG019")
+	want := []string{"binds hostPort 9100 on the node", "binds hostPort 53, 1053 on the node"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("KG019 = %q, want %q", got, want)
+	}
+	// A hostNetwork pod binds node ports by nature: KG011 reports that, and
+	// KG019 still reports the ports it declares.
+	fs := validateDoc(t, strings.Replace(pod, "spec:\n", "spec:\n  hostNetwork: true\n", 1))
+	if got := ids(fs); got["KG011"] != 1 || got["KG019"] != 2 {
+		t.Errorf("hostNetwork pod: %v", got)
+	}
+}
+
+func TestPodDisruptionBudget(t *testing.T) {
+	deploy := func(replicas string) string {
+		return `apiVersion: apps/v1
+kind: Deployment
+metadata: {name: web, namespace: shop}
+spec:
+  ` + replicas + `
+  template:
+    metadata: {labels: {app: web, tier: front}}
+    spec:
+      containers: [{name: web, image: nginx:1.27}]
+`
+	}
+	pdb := func(spec string) string {
+		return `---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata: {name: web, namespace: shop}
+spec:
+` + spec
+	}
+	hpa := `---
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata: {name: web, namespace: shop}
+spec:
+  scaleTargetRef: {apiVersion: apps/v1, kind: Deployment, name: web}
+  minReplicas: 3
+  maxReplicas: 10
+`
+	missing := "runs 3 replicas but no PodDisruptionBudget in this manifest set selects its pods"
+	cases := []struct{ name, doc, want string }{
+		{"one replica", deploy("replicas: 1"), ""},
+		{"replicas unset", deploy(""), ""},
+		{"no PDB", deploy("replicas: 3"), missing},
+		{"HPA scales it", deploy("") + hpa, missing},
+		{"matching PDB", deploy("replicas: 3") + pdb("  maxUnavailable: 1\n  selector: {matchLabels: {app: web}}\n"), ""},
+		{"matchExpressions", deploy("replicas: 3") + pdb("  minAvailable: 50%\n  selector: {matchExpressions: [{key: tier, operator: In, values: [front, back]}, {key: canary, operator: DoesNotExist}]}\n"), ""},
+		{"empty selector matches everything", deploy("replicas: 3") + pdb("  maxUnavailable: 1\n  selector: {}\n"), ""},
+		{"other labels", deploy("replicas: 3") + pdb("  maxUnavailable: 1\n  selector: {matchLabels: {app: api}}\n"), missing},
+		{"other namespace", deploy("replicas: 3") + strings.Replace(pdb("  maxUnavailable: 1\n  selector: {matchLabels: {app: web}}\n"), "namespace: shop", "namespace: other", 1), missing},
+		{"expression excludes it", deploy("replicas: 3") + pdb("  maxUnavailable: 1\n  selector: {matchExpressions: [{key: tier, operator: NotIn, values: [front]}]}\n"), missing},
+		{"maxUnavailable 0", deploy("replicas: 3") + pdb("  maxUnavailable: 0\n  selector: {matchLabels: {app: web}}\n"), "PodDisruptionBudget web allows no voluntary disruption (maxUnavailable 0)"},
+		{"minAvailable equal to replicas", deploy("replicas: 3") + pdb("  minAvailable: 3\n  selector: {matchLabels: {app: web}}\n"), "allows no voluntary disruption (minAvailable 3 with 3 replicas)"},
+		{"minAvailable 100%", deploy("replicas: 3") + pdb("  minAvailable: 100%\n  selector: {matchLabels: {app: web}}\n"), "(minAvailable 100%)"},
+		{"minAvailable below replicas", deploy("replicas: 3") + pdb("  minAvailable: 2\n  selector: {matchLabels: {app: web}}\n"), ""},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := strings.Join(messages(validateDoc(t, c.doc), "KG020"), "; ")
+			if c.want == "" && got != "" || !strings.Contains(got, c.want) {
+				t.Errorf("KG020 = %q, want %q", got, c.want)
+			}
+		})
+	}
+	// A DaemonSet runs one pod per node and a Job finishes: no budget needed.
+	if got := ids(validateDoc(t, strings.Replace(deploy("replicas: 3"), "kind: Deployment", "kind: DaemonSet", 1))); got["KG020"] != 0 {
+		t.Errorf("DaemonSet: %v", got)
+	}
+}
+
+func TestLiteralSecret(t *testing.T) {
+	const pod = `apiVersion: v1
+kind: Pod
+metadata: {name: db}
+spec:
+  containers:
+    - name: db
+      image: postgres:16
+      env:
+        - {name: POSTGRES_PASSWORD, value: hunter2}
+        - {name: API_KEY, value: AIzaSyD3m0}
+        - {name: POSTGRES_PASSWORD_FILE, value: /run/secrets/pw}
+        - {name: ALLOW_EMPTY_PASSWORD, value: "no"}
+        - {name: TOKEN_TTL, value: "3600"}
+        - {name: SECRET_NAME, value: db-credentials}
+        - {name: GOOGLE_API_KEY, value: GOOGLE_API_KEY_VAL}
+        - {name: ETCD_DISCOVERY_TOKEN, value: INSERT_ETCD_DISCOVERY_TOKEN}
+        - {name: VAULT_TOKEN, value: "${VAULT_TOKEN}"}
+        - {name: MYSQL_ROOT_PASSWORD, value: ""}
+        - {name: JWT_SECRET, value: changeme}
+        - {name: ADMIN_PASSWORD, valueFrom: {secretKeyRef: {name: admin, key: password}}}
+        - {name: PORT, value: "5432"}
+    - name: sidecar
+      image: proxy:1
+      env: [{name: PROXY_TOKEN, value: tok_live_4eC39HqLyjWDarjtT1zdp7dc}]
+`
+	got := messages(validateDoc(t, pod), "KG021")
+	want := []string{
+		"env POSTGRES_PASSWORD, API_KEY holds a literal credential: use valueFrom.secretKeyRef or a mounted file",
+		"env PROXY_TOKEN holds a literal credential: use valueFrom.secretKeyRef or a mounted file",
+	}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Errorf("KG021 = %q, want %q", got, want)
+	}
+	for _, m := range got {
+		if strings.Contains(m, "hunter2") || strings.Contains(m, "tok_live") {
+			t.Errorf("the finding prints the value: %s", m)
+		}
+	}
+}

@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -500,5 +501,20 @@ func TestHelmKubeVersionFromCluster(t *testing.T) {
 	}
 	if code, out, errOut := run(t, "diff", "-f", chart); code == ExitError {
 		t.Errorf("diff should render the chart for the cluster's version: %d %s%s", code, out, errOut)
+	}
+}
+
+// A mistyped command is not a resource for audit.
+func TestUnknownCommandSuggestion(t *testing.T) {
+	for word, want := range map[string]string{"chekc": "check", "dif": "diff", "ruls": "rules", "intit": "init", "expor": "export"} {
+		code, _, stderr := run(t, word, "-f", "x")
+		if code != ExitError || !strings.Contains(stderr, fmt.Sprintf("unknown command %q (did you mean %q?)", word, want)) {
+			t.Errorf("%s: exit %d, stderr %q", word, code, stderr)
+		}
+	}
+	for _, word := range []string{"pods", "deployment/web", "xyz"} {
+		if s := suggestCommand(word); s != "" {
+			t.Errorf("%s: suggested %q", word, s)
+		}
 	}
 }

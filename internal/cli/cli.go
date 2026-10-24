@@ -92,7 +92,9 @@ func (a *App) Run(args []string) int {
 		a.usage()
 	default:
 		// Shorthand: `kubectl guard -f x.yaml` or `kubectl guard deployment/app`.
-		if hasFileFlag(args) {
+		if s := suggestCommand(cmd); s != "" {
+			err = fmt.Errorf("unknown command %q (did you mean %q?); run `%s help`", cmd, s, a.Name)
+		} else if hasFileFlag(args) {
 			code, err = a.check(ctx, args)
 		} else if strings.HasPrefix(cmd, "-") && !strings.HasPrefix(cmd, "-n") && cmd != "--namespace" && cmd != "-A" {
 			err = fmt.Errorf("unknown flag %q; run `%s help`", cmd, a.Name)
@@ -107,6 +109,46 @@ func (a *App) Run(args []string) int {
 		return ExitError
 	}
 	return code
+}
+
+// commands are the words Run dispatches on, for typo suggestions.
+var commands = []string{"check", "audit", "diff", "cost", "interactive", "rules", "rule", "export", "mcp", "init", "version", "help"}
+
+// suggestCommand returns the command a mistyped word probably meant, or "".
+// A word with a slash is a resource for audit ("deployment/web"), never a
+// typo.
+func suggestCommand(word string) string {
+	if strings.Contains(word, "/") || strings.HasPrefix(word, "-") || len(word) < 3 {
+		return ""
+	}
+	best, bestDist := "", 3
+	for _, c := range commands {
+		if d := editDistance(strings.ToLower(word), c); d < bestDist {
+			best, bestDist = c, d
+		}
+	}
+	return best
+}
+
+// editDistance is the Levenshtein distance between a and b.
+func editDistance(a, b string) int {
+	prev := make([]int, len(b)+1)
+	for j := range prev {
+		prev[j] = j
+	}
+	for i := 1; i <= len(a); i++ {
+		cur := make([]int, len(b)+1)
+		cur[0] = i
+		for j := 1; j <= len(b); j++ {
+			cost := 1
+			if a[i-1] == b[j-1] {
+				cost = 0
+			}
+			cur[j] = min(prev[j]+1, cur[j-1]+1, prev[j-1]+cost)
+		}
+		prev = cur
+	}
+	return prev[len(b)]
 }
 
 func hasFileFlag(args []string) bool {

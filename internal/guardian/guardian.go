@@ -60,6 +60,9 @@ func Fix(ctx context.Context, f *manifest.File, opts FixOptions) (*FixResult, er
 	if f.HasKind("Secret") {
 		return nil, fmt.Errorf("%s contains a Secret: refusing to send it to the Claude API (move Secrets to their own file or fix without --ai)", f.Source)
 	}
+	if rules.HasLiteralSecret(f.Objects) {
+		return nil, fmt.Errorf("%s sets a credential as a literal env value (KG021): refusing to send it to the Claude API (move it to a Secret first, or fix without --ai)", f.Source)
+	}
 	src, err := f.Encode()
 	if err != nil {
 		return nil, err
