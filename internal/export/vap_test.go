@@ -83,3 +83,26 @@ spec:
 		}
 	}
 }
+
+// Pod Security related rules export too: seccomp (pod or every container),
+// the service account token and host ports.
+func TestPodSecurityRulesExport(t *testing.T) {
+	res, err := VAP([]string{"KG013", "KG014", "KG019"}, nil, Options{})
+	if err != nil || len(res.Skipped) != 0 {
+		t.Fatalf("err %v, skipped %v", err, res.Skipped)
+	}
+	y := string(res.YAML)
+	for _, want := range []string{
+		"name: k8s-guardian-kg013-seccomp-profile-pods", "name: k8s-guardian-kg019-no-host-port-cronjobs",
+		"variables.containers.all(c, has(c.securityContext) && has(c.securityContext.seccompProfile)",
+		"!variables.podSpec.automountServiceAccountToken", "c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)",
+		"- Warn", "- Audit",
+	} {
+		if !strings.Contains(y, want) {
+			t.Errorf("missing %q", want)
+		}
+	}
+	if strings.Contains(y, "- Deny") {
+		t.Error("a warning or info rule must not deny by default")
+	}
+}

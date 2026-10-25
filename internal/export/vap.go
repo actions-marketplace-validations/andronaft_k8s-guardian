@@ -60,6 +60,7 @@ type policy struct {
 	severity                       rules.Severity
 	kinds                          []string // resource-scope kinds
 	scope                          string   // resource | pod | container
+	containers                     bool     // a pod-scope expression that also uses variables.containers
 	expr                           string   // CEL, relative to object / variables.podSpec / container variable c
 }
 
@@ -150,8 +151,10 @@ func (p policy) checks() []check {
 		}
 		vars := []any{map[string]any{"name": "podSpec", "expression": fam.podSpec}}
 		expr := p.expr
-		if p.scope == "container" {
+		if p.scope == "container" || p.containers {
 			vars = append(vars, map[string]any{"name": "containers", "expression": containersExpr})
+		}
+		if p.scope == "container" {
 			expr = fmt.Sprintf("variables.containers.all(c, %s)", p.expr)
 		}
 		out = append(out, check{fam.suffix, kinds, vars, expr})
@@ -320,6 +323,9 @@ var builtinPolicies = map[string]policy{
 	"KG010": {scope: "container", expr: `has(c.image) && (c.image.contains('@sha256:') || (c.image.substring(c.image.lastIndexOf('/') + 1).contains(':') && !c.image.endsWith(':latest')))`},
 	"KG011": {scope: "pod", expr: `!(has(variables.podSpec.hostNetwork) && variables.podSpec.hostNetwork) && !(has(variables.podSpec.hostPID) && variables.podSpec.hostPID) && !(has(variables.podSpec.hostIPC) && variables.podSpec.hostIPC)`},
 	"KG012": {scope: "pod", expr: `!has(variables.podSpec.volumes) || variables.podSpec.volumes.all(v, !has(v.hostPath))`},
+	"KG013": {scope: "pod", containers: true, expr: `(has(variables.podSpec.securityContext) && has(variables.podSpec.securityContext.seccompProfile) && has(variables.podSpec.securityContext.seccompProfile.type) && variables.podSpec.securityContext.seccompProfile.type in ['RuntimeDefault', 'Localhost']) || variables.containers.all(c, has(c.securityContext) && has(c.securityContext.seccompProfile) && has(c.securityContext.seccompProfile.type) && c.securityContext.seccompProfile.type in ['RuntimeDefault', 'Localhost'])`},
+	"KG014": {scope: "pod", expr: `has(variables.podSpec.automountServiceAccountToken) && !variables.podSpec.automountServiceAccountToken`},
+	"KG019": {scope: "container", expr: `!has(c.ports) || c.ports.all(p, !has(p.hostPort) || p.hostPort == 0)`},
 }
 
 // BuiltinIDs lists the built-in rules that can be exported.

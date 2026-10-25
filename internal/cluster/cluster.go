@@ -8,10 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"os"
 	"os/exec"
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/andronaft/k8s-guardian/internal/k8sname"
 	"github.com/andronaft/k8s-guardian/internal/kube"
@@ -137,6 +139,17 @@ func NewKubectl(context string) (*Kubectl, error) {
 	return &Kubectl{Context: context, cache: map[string]any{}}, nil
 }
 
+// requestTimeout bounds every kubectl call (K8S_GUARDIAN_KUBECTL_TIMEOUT
+// overrides it, e.g. "2m" for slow clusters).
+var requestTimeout = kubectlTimeout(os.Getenv("K8S_GUARDIAN_KUBECTL_TIMEOUT"))
+
+func kubectlTimeout(env string) string {
+	if d, err := time.ParseDuration(env); err == nil && d > 0 {
+		return env
+	}
+	return "30s"
+}
+
 func (k *Kubectl) run(args ...string) ([]byte, error) {
 	out, msg, err := k.exec(nil, args...)
 	if err != nil {
@@ -150,6 +163,8 @@ func (k *Kubectl) run(args ...string) ([]byte, error) {
 
 // exec runs kubectl with stdin and returns stdout and the trimmed stderr.
 func (k *Kubectl) exec(stdin []byte, args ...string) ([]byte, string, error) {
+	// Without a timeout a cluster that doesn't answer hangs every check.
+	args = append(args, "--request-timeout="+requestTimeout)
 	if k.Context != "" {
 		args = append(args, "--context="+k.Context)
 	}

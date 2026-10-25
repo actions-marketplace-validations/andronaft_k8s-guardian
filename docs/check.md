@@ -70,7 +70,7 @@ To review each fix before it is applied, see [interactive review](interactive.md
 | KG021 | `literal-secret`: an env var that looks like a credential (`PASSWORD`, `SECRET`, `TOKEN`, `API_KEY`, `PRIVATE_KEY`) has a literal `value`; names that hold a path, a name or a setting (`_FILE`, `_NAME`, `_ENABLED`, …) and placeholder values are skipped, and the value is never printed | warning | AI |
 | KG020 | `pod-disruption-budget`: a workload with 2+ replicas (or an HPA with `minReplicas` ≥ 2) has no PodDisruptionBudget in the manifest set selecting its pods, or one that allows no disruption (`maxUnavailable: 0`, `minAvailable` ≥ replicas) | info | AI |
 
-auto: `--fix`. auto*: `--fix --unsafe-fixes` (review the result). AI: only `--fix --ai` or a manual edit.
+auto: `--fix`. auto*: `--fix --unsafe-fixes` (review the result). AI: only `--fix --ai` or a manual edit. `k8s-guardian rules` prints this list, and `rules --format json` the same for tooling (ID, name, severity, description, scope and fix kind, custom rules included).
 
 `k8s-guardian rules` lists every rule, including custom, live and diff rules. To write your own, see [custom rules](custom-rules.md).
 

@@ -3,6 +3,7 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -310,7 +311,36 @@ func (f *flags) options() (rules.Options, error) {
 	if err := f.severityOverrides(c, opts); err != nil {
 		return opts, err
 	}
+	if err := f.checkSkip(c, opts); err != nil {
+		return opts, err
+	}
 	return opts, nil
+}
+
+// checkSkip rejects a skip list that names no rule, so a typo doesn't leave
+// the rule running (or hide why a finding keeps appearing).
+func (f *flags) checkSkip(c *config.Config, opts rules.Options) error {
+	for _, s := range append(strings.Split(f.skip, ","), c.Skip...) {
+		s = strings.TrimSpace(s)
+		if s == "" || knownRules(opts)[strings.ToLower(s)] {
+			continue
+		}
+		where := "--skip"
+		if c.Path != "" && !strings.Contains(f.skip, s) {
+			where = "config " + c.Path + ": skip"
+		}
+		return fmt.Errorf("%s: unknown rule %q (the rules command lists them)", where, s)
+	}
+	return nil
+}
+
+// knownRules indexes every rule ID and name, lower-cased.
+func knownRules(opts rules.Options) map[string]bool {
+	known := map[string]bool{}
+	for _, r := range append(append(opts.Rules(), live.Rules...), diff.Rules...) {
+		known[strings.ToLower(r.ID)], known[strings.ToLower(r.Name)] = true, true
+	}
+	return known
 }
 
 // severityOverrides validates the config's severity map against every known
@@ -319,10 +349,7 @@ func (f *flags) severityOverrides(c *config.Config, opts rules.Options) error {
 	if len(c.Severity) == 0 {
 		return nil
 	}
-	known := map[string]bool{}
-	for _, r := range append(append(opts.Rules(), live.Rules...), diff.Rules...) {
-		known[strings.ToLower(r.ID)], known[strings.ToLower(r.Name)] = true, true
-	}
+	known := knownRules(opts)
 	f.severity = map[string]rules.Severity{}
 	for k, v := range c.Severity {
 		if !known[strings.ToLower(k)] {
@@ -449,14 +476,23 @@ func exitCode(fs []rules.Finding, failOn rules.Severity) int {
 
 func (a *App) listRules(args []string) error {
 	var f flags
-	fs := a.flagSet("rules", "rules [--rules <path>]")
+	fs := a.flagSet("rules", "rules [--rules <path>] [--format text|json]")
 	f.ruleFlags(fs)
+	fs.StringVar(&f.format, "format", "text", "output format: text, json")
+	fs.StringVar(&f.format, "o", "text", "shorthand for --format")
 	if _, err := parse(fs, args); err != nil {
 		return err
 	}
 	opts, err := f.options()
 	if err != nil {
 		return err
+	}
+	switch f.format {
+	case "json":
+		return a.rulesJSON(opts)
+	case "text":
+	default:
+		return fmt.Errorf("unknown format %q (text, json)", f.format)
 	}
 	section := func(title string, rs []*rules.Rule, fixCol bool) {
 		if len(rs) == 0 {
@@ -485,6 +521,58 @@ func (a *App) listRules(args []string) error {
 	section("Change rules (diff):", diff.Rules, false)
 	fmt.Fprintf(a.Stdout, "\nSkip rules per resource with the annotation %s: \"KG006,liveness-probe\"\n", rules.IgnoreAnnotation)
 	return nil
+}
+
+// ruleInfo is one rule in `rules --format json`.
+type ruleInfo struct {
+	ID          string `json:"id"`
+	Name        string `json:"name"`
+	Severity    string `json:"severity"`
+	Description string `json:"description"`
+	// Scope is container, pod or resource for check rules, live or diff
+	// for the others.
+	Scope string `json:"scope"`
+	// Fix is auto, unsafe (needs --fix --unsafe-fixes), ai or none.
+	Fix    string `json:"fix"`
+	Custom bool   `json:"custom,omitempty"`
+}
+
+// rulesJSON prints every rule as JSON, for tooling and docs generation.
+func (a *App) rulesJSON(opts rules.Options) error {
+	var out []ruleInfo
+	add := func(rs []*rules.Rule, scope, fix string) {
+		for _, r := range rs {
+			info := ruleInfo{ID: r.ID, Name: r.Name, Severity: r.Severity.String(), Description: r.Description, Scope: scope, Fix: fix, Custom: r.Custom}
+			if scope == "" {
+				switch {
+				case r.Container != nil:
+					info.Scope = "container"
+				case r.Pod != nil:
+					info.Scope = "pod"
+				default:
+					info.Scope = "resource"
+				}
+			}
+			if fix == "" {
+				switch {
+				case r.Fix != nil && r.Unsafe:
+					info.Fix = "unsafe"
+				case r.Fix != nil:
+					info.Fix = "auto"
+				default:
+					info.Fix = "ai"
+				}
+			}
+			out = append(out, info)
+		}
+	}
+	add(rules.All, "", "")
+	add(opts.Custom, "", "")
+	add(live.Rules, "live", "none")
+	add(diff.Rules, "diff", "none")
+	enc := json.NewEncoder(a.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(out)
 }
 
 func (a *App) usage() {
@@ -535,7 +623,8 @@ Shorthands (kubectl plugin style):
 Common flags: --format text|json|sarif|github|markdown  --fail-on error|warning|info  --skip KG006,KG015  --rules <path>  --config <file>
 Exit codes: 0 ok, 1 findings at/above --fail-on, 2 usage or runtime error.
 Environment: ANTHROPIC_API_KEY (for --ai), K8S_GUARDIAN_MODEL (default %[3]s),
-             K8S_GUARDIAN_RULES, K8S_GUARDIAN_CPU_HOUR / K8S_GUARDIAN_GIB_HOUR (cost).
+             K8S_GUARDIAN_RULES, K8S_GUARDIAN_CPU_HOUR / K8S_GUARDIAN_GIB_HOUR (cost),
+             K8S_GUARDIAN_KUBECTL_TIMEOUT (per kubectl call, default 30s).
 Run "%[1]s <command> -h" for command flags.
 `, a.Name, a.Version, ai.DefaultModel)
 }

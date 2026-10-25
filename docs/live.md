@@ -25,7 +25,7 @@ examples/costly-app.yaml  Deployment/orders-api
 | LV006 | Referenced ConfigMaps, Secrets, ServiceAccounts, PVCs and PriorityClasses exist in the cluster or in the manifest set |
 | LV007 | StorageClass exists, or the cluster has a default one |
 
-Everything is read-only (`kubectl get`). Checks that RBAC doesn't allow are skipped with a note.
+Everything is read-only (`kubectl get`). Checks that RBAC doesn't allow are skipped with a note. Every `kubectl` call has a 30 s timeout (`K8S_GUARDIAN_KUBECTL_TIMEOUT` changes it), so an unreachable cluster fails fast instead of hanging.
 
 ```text
 ✖ error   LV003  pod requests 8 CPU but the largest matching node (node-a) has 3920m allocatable;

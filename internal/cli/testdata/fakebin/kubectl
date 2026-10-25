@@ -3,6 +3,7 @@
 args="$*"
 if [ -n "$FAKE_KUBECTL_LOG" ]; then printf '%s\n' "$args" >> "$FAKE_KUBECTL_LOG"; fi
 args="${args% --context=*}"
+args="${args% --request-timeout=*}"
 case "$args" in
   "version -o json") echo '{"serverVersion":{"gitVersion":"v1.29.4"}}' ;;
   "api-versions") printf 'v1\napps/v1\nbatch/v1\nautoscaling/v2\npolicy/v1\nnetworking.k8s.io/v1\n' ;;

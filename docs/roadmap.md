@@ -24,6 +24,9 @@ All on `main`:
 | [#13](https://github.com/andronaft/k8s-guardian/issues/13) | KG019: no host ports |
 | [#14](https://github.com/andronaft/k8s-guardian/issues/14) | KG020: PodDisruptionBudget for workloads with 2+ replicas |
 | [#17](https://github.com/andronaft/k8s-guardian/issues/17) | KG021: literal credentials in env values (the prototype was precise on real manifests) |
+| | KG013, KG014 and KG019 exported as ValidatingAdmissionPolicies and Kyverno policies, verified against a real API server and Kyverno |
+| | Every `kubectl` call has a timeout; unknown rules in `skip` are an error; Helm charts render their `crds/` |
+| [#29](https://github.com/andronaft/k8s-guardian/issues/29) | `rules --format json` for tooling |
 
 ## Next: [v0.9.0](https://github.com/andronaft/k8s-guardian/milestone/4), coverage
 
@@ -34,7 +37,10 @@ Check what matters most in the Kubernetes security model, and more of the worklo
 | [#12](https://github.com/andronaft/k8s-guardian/issues/12) | Pod Security Standards profiles: `--profile baseline\|restricted` |
 | [#15](https://github.com/andronaft/k8s-guardian/issues/15) | Configurable workload kinds for CRDs (Knative, KubeVirt, …) |
 | [#16](https://github.com/andronaft/k8s-guardian/issues/16) | Export Argo Rollouts and probe rules to VAP and Kyverno |
-| [#5](https://github.com/andronaft/k8s-guardian/issues/5) | GitHub Action: inputs for config, baseline and Helm values *(good first issue)* |
+| [#26](https://github.com/andronaft/k8s-guardian/issues/26) | GitHub Action: post the findings as a pull request comment |
+| [#30](https://github.com/andronaft/k8s-guardian/issues/30) | GitHub Action: use the release binary instead of building from source |
+| [#28](https://github.com/andronaft/k8s-guardian/issues/28) | LV003: required pod anti-affinity and topology spread constraints |
+| [#27](https://github.com/andronaft/k8s-guardian/issues/27) | Kustomize: render `helmCharts` entries *(good first issue)* |
 
 ## [Later](https://github.com/andronaft/k8s-guardian/milestone/3): ideas that need evidence first
 

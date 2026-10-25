@@ -59,5 +59,6 @@ flowchart LR
 | `ANTHROPIC_API_KEY`, `ANTHROPIC_AUTH_TOKEN` | [AI features](ai.md) |
 | `K8S_GUARDIAN_MODEL` | Claude model (default `claude-opus-5-5`) |
 | `K8S_GUARDIAN_RULES` | Extra custom rule paths, separated like `$PATH` |
+| `K8S_GUARDIAN_KUBECTL_TIMEOUT` | Timeout of every `kubectl` call made by `--live`, `diff` and `audit` (default `30s`), so an unreachable cluster fails fast |
 | `K8S_GUARDIAN_CPU_HOUR`, `K8S_GUARDIAN_GIB_HOUR` | Prices for [cost](cost.md) |
 | `K8S_GUARDIAN_PROMETHEUS_TOKEN` | Bearer token for `cost --prometheus` |
